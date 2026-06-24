@@ -203,8 +203,49 @@ input {
 }
 
 .import-log {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
   overflow: auto;
   line-height: 1.35;
+}
+
+.import-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.import-log-header span {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.copy-log-button {
+  min-width: 54px;
+  height: 26px;
+  border: 1px solid #cfc7ba;
+  border-radius: 6px;
+  background: #fffdf8;
+  color: #1d1c1a;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.copy-log-button:hover {
+  border-color: #1f5f87;
+}
+
+.import-log-message {
+  min-height: 0;
+  overflow: auto;
+  word-break: break-word;
 }
 
 .status-running {

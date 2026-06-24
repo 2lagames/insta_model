@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { importInstagramUrl, listImports, openImportsFolder } from "./lib/api";
 import type { ImportAsset, ImportItem } from "./lib/importTypes";
 import { validateInstagramUrl } from "./lib/instagramUrl";
+import { createStatusLogText } from "./lib/statusLog";
 
 type StatusTone = "idle" | "running" | "error" | "ready";
 
@@ -16,6 +17,7 @@ export default function App() {
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [status, setStatus] = useState<StatusState>({ tone: "idle", message: "Ready" });
   const [isImporting, setIsImporting] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
   const galleryAssets = useMemo(() => flattenImportAssets(items), [items]);
   const selectedAsset = useMemo(
@@ -72,6 +74,17 @@ export default function App() {
     }
   }
 
+  async function handleCopyStatusLog() {
+    try {
+      await navigator.clipboard.writeText(createStatusLogText(status.tone, status.message));
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 1600);
+    } catch {
+      setCopyState("failed");
+      window.setTimeout(() => setCopyState("idle"), 2200);
+    }
+  }
+
   return (
     <main className="app-shell">
       <section className="top-bar">
@@ -108,7 +121,15 @@ export default function App() {
       </section>
 
       <section className="bottom-gallery">
-        <div className={`import-log status-${status.tone}`}>{status.message}</div>
+        <div className={`import-log status-${status.tone}`}>
+          <div className="import-log-header">
+            <span>{status.tone}</span>
+            <button className="copy-log-button" onClick={handleCopyStatusLog} type="button">
+              {copyState === "copied" ? "Copied" : copyState === "failed" ? "Failed" : "Copy"}
+            </button>
+          </div>
+          <div className="import-log-message">{status.message}</div>
+        </div>
         <div className="gallery-strip">
           {items.length === 0 ? (
             <span>Imported materials will appear here.</span>
