@@ -173,7 +173,9 @@ data/
 
 - если `yt-dlp` не найден, UI показывает инструкцию установки;
 - если `ffmpeg` не найден, видео скачивается, но first frame помечается как failed;
-- если Instagram требует cookies/login, UI показывает понятную ошибку и не скрывает stderr полностью.
+- `yt-dlp` запускается с `--ignore-config`, чтобы приложение не наследовало сторонние пользовательские настройки из `~/.config/yt-dlp/config`;
+- `yt-dlp` по умолчанию запускается с `--cookies-from-browser chrome`, чтобы использовать авторизованный Chrome-профиль для Instagram;
+- если Instagram требует cookies/login даже после Chrome cookies, UI показывает понятную ошибку и не скрывает stderr полностью.
 
 ## 8. Ошибки и edge cases
 

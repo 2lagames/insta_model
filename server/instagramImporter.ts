@@ -16,6 +16,7 @@ type YtDlpInfo = {
 export type ImportInstagramOptions = {
   dataDir: string;
   publicBasePath?: string;
+  cookiesFromBrowser?: string;
 };
 
 export function classifyYtDlpInfo(info: Partial<YtDlpInfo>): MediaKind {
@@ -50,15 +51,7 @@ export async function importInstagramUrl(
   await mkdir(importDir, { recursive: true });
 
   const outputTemplate = join(importDir, "media-%(autonumber)03d.%(ext)s");
-  await runCommand("yt-dlp", [
-    "--write-info-json",
-    "--write-thumbnail",
-    "--convert-thumbnails",
-    "jpg",
-    "-o",
-    outputTemplate,
-    sourceUrl
-  ]);
+  await runCommand("yt-dlp", buildYtDlpArgs(outputTemplate, sourceUrl, options.cookiesFromBrowser));
 
   const info = await readYtDlpInfo(importDir);
   const publicBasePath = options.publicBasePath ?? "/media";
@@ -150,6 +143,45 @@ export async function collectImportAssets(
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
+export function buildYtDlpArgs(
+  outputTemplate: string,
+  sourceUrl: string,
+  cookiesFromBrowser = process.env.YTDLP_COOKIES_FROM_BROWSER ?? "chrome"
+): string[] {
+  const args = [
+    "--ignore-config",
+    "--no-update",
+    "--write-info-json",
+    "--write-thumbnail",
+    "--convert-thumbnails",
+    "jpg",
+    "-o",
+    outputTemplate
+  ];
+
+  if (cookiesFromBrowser !== "none") {
+    args.push("--cookies-from-browser", cookiesFromBrowser);
+  }
+
+  args.push(sourceUrl);
+  return args;
+}
+
+export function enhanceYtDlpError(stderr: string): string {
+  const loginRequired = /login required|rate-limit reached|locked behind the login page|No csrf token/i.test(stderr);
+  if (!loginRequired) {
+    return stderr.trim();
+  }
+
+  return [
+    "Instagram requires authenticated browser cookies.",
+    "Open Instagram in Google Chrome, make sure the post is visible while logged in, then retry.",
+    "The app now runs yt-dlp with --ignore-config --cookies-from-browser chrome, so it will not use unrelated ~/.config/yt-dlp cookies.",
+    "",
+    stderr.trim()
+  ].join("\n");
+}
+
 function toPublicPath(absolutePath: string, dataDir: string, publicBasePath: string): string {
   const rel = relative(dataDir, absolutePath).split("/").join("/");
   return `${publicBasePath}/${rel}`;
@@ -206,7 +238,8 @@ function runCommand(command: string, args: string[]): Promise<void> {
         resolve();
         return;
       }
-      reject(new Error(`${command} exited with code ${code}: ${stderr.trim()}`));
+      const details = command === "yt-dlp" ? enhanceYtDlpError(stderr) : stderr.trim();
+      reject(new Error(`${command} exited with code ${code}: ${details}`));
     });
   });
 }
