@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { basename, extname, join, relative } from "node:path";
-import type { ImportFiles, ImportItem, MediaKind } from "../src/lib/importTypes";
+import { extname, join, relative } from "node:path";
+import type { ImportAsset, ImportFiles, ImportItem, MediaKind } from "../src/lib/importTypes";
 
 type YtDlpInfo = {
   id?: string;
@@ -49,9 +49,8 @@ export async function importInstagramUrl(
   const importDir = join(options.dataDir, "imports", importId);
   await mkdir(importDir, { recursive: true });
 
-  const outputTemplate = join(importDir, "media.%(ext)s");
+  const outputTemplate = join(importDir, "media-%(autonumber)03d.%(ext)s");
   await runCommand("yt-dlp", [
-    "--no-playlist",
     "--write-info-json",
     "--write-thumbnail",
     "--convert-thumbnails",
@@ -62,23 +61,29 @@ export async function importInstagramUrl(
   ]);
 
   const info = await readYtDlpInfo(importDir);
-  const mediaType = classifyYtDlpInfo(info);
-  const files = await collectImportFiles(importDir, options.publicBasePath ?? "/media");
+  const publicBasePath = options.publicBasePath ?? "/media";
+  const assets = await collectImportAssets(importDir, options.dataDir, publicBasePath);
 
-  if (mediaType === "video" && files.video) {
-    const firstFramePath = join(importDir, "first_frame.jpg");
-    await runCommand("ffmpeg", [
-      "-y",
-      "-ss",
-      "00:00:00.5",
-      "-i",
-      join(options.dataDir, "..", files.video.replace(/^\/media\//, "data/")),
-      "-frames:v",
-      "1",
-      firstFramePath
-    ]);
-    files.firstFrame = toPublicPath(firstFramePath, options.dataDir, options.publicBasePath ?? "/media");
+  for (const asset of assets) {
+    if (asset.mediaType === "video" && asset.absoluteVideoPath) {
+      const firstFramePath = join(importDir, `first-frame-${asset.id}.jpg`);
+      await runCommand("ffmpeg", [
+        "-y",
+        "-ss",
+        "00:00:00.5",
+        "-i",
+        asset.absoluteVideoPath,
+        "-frames:v",
+        "1",
+        firstFramePath
+      ]);
+      asset.files.firstFrame = toPublicPath(firstFramePath, options.dataDir, publicBasePath);
+    }
   }
+
+  const publicAssets = assets.map(({ absoluteVideoPath: _absoluteVideoPath, ...asset }) => asset);
+  const mediaType = publicAssets.length > 1 ? "carousel" : publicAssets[0]?.mediaType ?? classifyYtDlpInfo(info);
+  const files = publicAssets[0]?.files ?? {};
 
   const item: ImportItem = {
     id: importId,
@@ -87,7 +92,8 @@ export async function importInstagramUrl(
     status: "ready",
     createdAt: new Date().toISOString(),
     title: info.title,
-    files
+    files,
+    assets: publicAssets
   };
 
   await writeFile(join(importDir, "source.json"), JSON.stringify({ sourceUrl }, null, 2), "utf8");
@@ -105,34 +111,75 @@ async function readYtDlpInfo(importDir: string): Promise<YtDlpInfo> {
   return JSON.parse(raw) as YtDlpInfo;
 }
 
-async function collectImportFiles(importDir: string, publicBasePath: string): Promise<ImportFiles> {
+type InternalImportAsset = ImportAsset & {
+  absoluteVideoPath?: string;
+};
+
+export async function collectImportAssets(
+  importDir: string,
+  dataDir: string,
+  publicBasePath: string
+): Promise<InternalImportAsset[]> {
   const files = await readdir(importDir);
-  const result: ImportFiles = {};
+  const groups = new Map<string, InternalImportAsset>();
 
   for (const file of files) {
     const absolute = join(importDir, file);
     const ext = extname(file).toLowerCase();
+    const key = getAssetKey(file);
+    const asset = getOrCreateAsset(groups, key);
+    const publicPath = toPublicPath(absolute, dataDir, publicBasePath);
 
     if (file.endsWith(".info.json")) {
-      result.metadata = toPublicPath(absolute, join(importDir, "..", ".."), publicBasePath);
-    } else if (file === "first_frame.jpg") {
-      result.firstFrame = toPublicPath(absolute, join(importDir, "..", ".."), publicBasePath);
+      asset.files.metadata = publicPath;
+    } else if (file.startsWith("first-frame-")) {
+      asset.files.firstFrame = publicPath;
     } else if ([".jpg", ".jpeg", ".png", ".webp"].includes(ext)) {
-      result.thumbnail = toPublicPath(absolute, join(importDir, "..", ".."), publicBasePath);
-      if (basename(file).startsWith("media.")) {
-        result.image = result.thumbnail;
-      }
+      asset.mediaType = "image";
+      asset.files.image = publicPath;
+      asset.files.thumbnail = publicPath;
     } else if ([".mp4", ".mov", ".m4v", ".webm"].includes(ext)) {
-      result.video = toPublicPath(absolute, join(importDir, "..", ".."), publicBasePath);
+      asset.mediaType = "video";
+      asset.files.video = publicPath;
+      asset.absoluteVideoPath = absolute;
     }
   }
 
-  return result;
+  return Array.from(groups.values())
+    .filter((asset) => asset.files.image || asset.files.video)
+    .sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function toPublicPath(absolutePath: string, dataDir: string, publicBasePath: string): string {
   const rel = relative(dataDir, absolutePath).split("/").join("/");
   return `${publicBasePath}/${rel}`;
+}
+
+function getAssetKey(file: string): string {
+  if (file.startsWith("first-frame-")) {
+    return file.replace(/^first-frame-/, "").replace(/\.jpg$/, "");
+  }
+
+  if (file.endsWith(".info.json")) {
+    return file.replace(/\.info\.json$/, "");
+  }
+
+  return file.replace(/\.[^.]+$/, "");
+}
+
+function getOrCreateAsset(groups: Map<string, InternalImportAsset>, id: string): InternalImportAsset {
+  const existing = groups.get(id);
+  if (existing) {
+    return existing;
+  }
+
+  const asset: InternalImportAsset = {
+    id,
+    mediaType: "image",
+    files: {}
+  };
+  groups.set(id, asset);
+  return asset;
 }
 
 function createImportId(): string {

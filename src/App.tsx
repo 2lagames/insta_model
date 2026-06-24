@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { importInstagramUrl, listImports, openImportsFolder } from "./lib/api";
-import type { ImportItem } from "./lib/importTypes";
+import type { ImportAsset, ImportItem } from "./lib/importTypes";
 import { validateInstagramUrl } from "./lib/instagramUrl";
 
 type StatusTone = "idle" | "running" | "error" | "ready";
@@ -13,20 +13,21 @@ type StatusState = {
 export default function App() {
   const [url, setUrl] = useState("");
   const [items, setItems] = useState<ImportItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [status, setStatus] = useState<StatusState>({ tone: "idle", message: "Ready" });
   const [isImporting, setIsImporting] = useState(false);
 
-  const selectedItem = useMemo(
-    () => items.find((item) => item.id === selectedId) ?? items[0],
-    [items, selectedId]
+  const galleryAssets = useMemo(() => flattenImportAssets(items), [items]);
+  const selectedAsset = useMemo(
+    () => galleryAssets.find((asset) => asset.id === selectedAssetId) ?? galleryAssets[0],
+    [galleryAssets, selectedAssetId]
   );
 
   useEffect(() => {
     listImports()
       .then((loadedItems) => {
         setItems(loadedItems);
-        setSelectedId(loadedItems[0]?.id ?? null);
+        setSelectedAssetId(flattenImportAssets(loadedItems)[0]?.id ?? null);
       })
       .catch((error: unknown) => {
         setStatus({ tone: "error", message: toErrorMessage(error) });
@@ -46,8 +47,14 @@ export default function App() {
     try {
       const imported = await importInstagramUrl(validation.url);
       setItems((current) => [imported, ...current.filter((item) => item.id !== imported.id)]);
-      setSelectedId(imported.id);
-      setStatus({ tone: "ready", message: "Import complete." });
+      const importedAssets = flattenImportAssets([imported]);
+      setSelectedAssetId(importedAssets[0]?.id ?? null);
+      setStatus({
+        tone: "ready",
+        message: importedAssets.length > 1
+          ? `Import complete: ${importedAssets.length} materials added.`
+          : "Import complete."
+      });
       setUrl("");
     } catch (error) {
       setStatus({ tone: "error", message: toErrorMessage(error) });
@@ -88,7 +95,7 @@ export default function App() {
       <section className="workspace">
         <section className="preview-panel">
           <div className="panel-label">Preview</div>
-          <Preview item={selectedItem} />
+          <Preview selected={selectedAsset} />
         </section>
 
         <aside className="generation-panel">
@@ -106,15 +113,15 @@ export default function App() {
           {items.length === 0 ? (
             <span>Imported materials will appear here.</span>
           ) : (
-            items.map((item) => (
+            galleryAssets.map((asset) => (
               <button
-                className={`gallery-item ${item.id === selectedItem?.id ? "selected" : ""}`}
-                key={item.id}
-                onClick={() => setSelectedId(item.id)}
+                className={`gallery-item ${asset.id === selectedAsset?.id ? "selected" : ""}`}
+                key={asset.id}
+                onClick={() => setSelectedAssetId(asset.id)}
                 type="button"
               >
-                <GalleryThumb item={item} />
-                <span>{item.mediaType}</span>
+                <GalleryThumb asset={asset.asset} />
+                <span>{asset.asset.mediaType}</span>
               </button>
             ))
           )}
@@ -124,20 +131,27 @@ export default function App() {
   );
 }
 
-function Preview({ item }: { item?: ImportItem }) {
-  if (!item) {
+type GalleryAsset = {
+  id: string;
+  importItem: ImportItem;
+  asset: ImportAsset;
+};
+
+function Preview({ selected }: { selected?: GalleryAsset }) {
+  if (!selected) {
     return <div className="preview-empty">Import an Instagram post or reel to preview media here.</div>;
   }
 
-  const imageSource = item.files.image ?? item.files.firstFrame ?? item.files.thumbnail;
+  const { asset, importItem } = selected;
+  const imageSource = asset.files.image ?? asset.files.firstFrame ?? asset.files.thumbnail;
 
   return (
     <div className="preview-content">
       <div className="media-stage">
-        {item.files.video ? (
-          <video controls poster={item.files.firstFrame ?? item.files.thumbnail} src={item.files.video} />
+        {asset.files.video ? (
+          <video controls poster={asset.files.firstFrame ?? asset.files.thumbnail} src={asset.files.video} />
         ) : imageSource ? (
-          <img alt={item.title ?? "Imported Instagram media"} src={imageSource} />
+          <img alt={importItem.title ?? "Imported Instagram media"} src={imageSource} />
         ) : (
           <div className="preview-empty">No preview file was generated for this import.</div>
         )}
@@ -145,33 +159,47 @@ function Preview({ item }: { item?: ImportItem }) {
       <dl className="metadata-grid">
         <div>
           <dt>Type</dt>
-          <dd>{item.mediaType}</dd>
+          <dd>{asset.mediaType}</dd>
         </div>
         <div>
           <dt>Status</dt>
-          <dd>{item.status}</dd>
+          <dd>{importItem.status}</dd>
         </div>
         <div>
           <dt>Imported</dt>
-          <dd>{new Date(item.createdAt).toLocaleString()}</dd>
+          <dd>{new Date(importItem.createdAt).toLocaleString()}</dd>
         </div>
         <div>
           <dt>Source</dt>
-          <dd><a href={item.sourceUrl} rel="noreferrer" target="_blank">Open Instagram link</a></dd>
+          <dd><a href={importItem.sourceUrl} rel="noreferrer" target="_blank">Open Instagram link</a></dd>
         </div>
       </dl>
     </div>
   );
 }
 
-function GalleryThumb({ item }: { item: ImportItem }) {
-  const source = item.files.firstFrame ?? item.files.image ?? item.files.thumbnail;
+function GalleryThumb({ asset }: { asset: ImportAsset }) {
+  const source = asset.files.firstFrame ?? asset.files.image ?? asset.files.thumbnail;
 
   if (source) {
     return <img alt="" src={source} />;
   }
 
-  return <span className="gallery-fallback">{item.mediaType.slice(0, 1).toUpperCase()}</span>;
+  return <span className="gallery-fallback">{asset.mediaType.slice(0, 1).toUpperCase()}</span>;
+}
+
+function flattenImportAssets(items: ImportItem[]): GalleryAsset[] {
+  return items.flatMap((item) => {
+    const assets = item.assets.length > 0
+      ? item.assets
+      : [{ id: "media", mediaType: item.mediaType === "video" ? "video" : "image", files: item.files } satisfies ImportAsset];
+
+    return assets.map((asset) => ({
+      id: `${item.id}:${asset.id}`,
+      importItem: item,
+      asset
+    }));
+  });
 }
 
 function toErrorMessage(error: unknown): string {

@@ -17,7 +17,18 @@ const sampleItem: ImportItem = {
     video: "data/imports/20260624-153000-abc123/media.mp4",
     firstFrame: "data/imports/20260624-153000-abc123/first_frame.jpg",
     metadata: "data/imports/20260624-153000-abc123/yt_dlp.info.json"
-  }
+  },
+  assets: [
+    {
+      id: "media",
+      mediaType: "video",
+      files: {
+        video: "data/imports/20260624-153000-abc123/media.mp4",
+        firstFrame: "data/imports/20260624-153000-abc123/first_frame.jpg",
+        metadata: "data/imports/20260624-153000-abc123/yt_dlp.info.json"
+      }
+    }
+  ]
 };
 
 beforeEach(async () => {

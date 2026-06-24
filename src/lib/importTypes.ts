@@ -10,6 +10,12 @@ export type ImportFiles = {
   metadata?: string;
 };
 
+export type ImportAsset = {
+  id: string;
+  mediaType: Exclude<MediaKind, "carousel" | "unknown">;
+  files: ImportFiles;
+};
+
 export type ImportItem = {
   id: string;
   sourceUrl: string;
@@ -19,6 +25,7 @@ export type ImportItem = {
   title?: string;
   error?: string;
   files: ImportFiles;
+  assets: ImportAsset[];
 };
 
 export type ImportIndex = {
@@ -28,4 +35,3 @@ export type ImportIndex = {
 export type UrlValidationResult =
   | { ok: true; url: string }
   | { ok: false; message: string };
-
