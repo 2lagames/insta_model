@@ -2,5 +2,12 @@
 node_modules/
 dist/
 build/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+src/**/*.js
+src/**/*.d.ts
+!src/vite-env.d.ts
+server/**/*.js
+server/**/*.d.ts
 .DS_Store
-
