@@ -6,8 +6,8 @@ Provide double-click launchers for Windows and macOS that start the local projec
 
 ## Deliverables
 
-- `Запустить проект.bat` for Windows.
-- `Запустить проект.command` for macOS.
+- `start.bat` for Windows.
+- `start.command` for macOS.
 
 ## Behaviour
 

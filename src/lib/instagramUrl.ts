@@ -1,4 +1,4 @@
-import type { UrlValidationResult } from "./importTypes";
+import type { InstagramSourceKind, UrlValidationResult } from "./importTypes";
 
 const supportedPathPattern = /^\/(p|reel|tv)\/[^/]+\/?$/;
 
@@ -26,5 +26,19 @@ export function validateInstagramUrl(value: string): UrlValidationResult {
     return { ok: false, message: "Use an Instagram /p/, /reel/, or /tv/ URL." };
   }
 
-  return { ok: true, url: parsed.toString() };
+  return { ok: true, url: toCanonicalInstagramUrl(parsed) };
+}
+
+export function getInstagramSourceKind(value: string): InstagramSourceKind {
+  const pathname = new URL(value).pathname;
+  return pathname.startsWith("/reel/") || pathname.startsWith("/tv/") ? "reel" : "post";
+}
+
+export function canonicalizeInstagramUrl(value: string): string {
+  return toCanonicalInstagramUrl(new URL(value));
+}
+
+function toCanonicalInstagramUrl(parsed: URL): string {
+  const [, kind, shortcode] = parsed.pathname.match(/^\/(p|reel|tv)\/([^/]+)\/?$/) ?? [];
+  return `https://www.instagram.com/${kind}/${shortcode}/`;
 }

@@ -1,12 +1,16 @@
 # Plan: Instagram Content Factory For A Female Model
 
-Дата обновления: 2026-06-24
+Дата обновления: 2026-06-25
 
 ## 1. Цель
 
 Построить контент-завод для ведения Instagram-аккаунта девушки-модели: находить тренды, анализировать их пригодность, превращать тренды в конкретные фото/видео-идеи, генерировать или готовить материалы через API, отдавать готовый пакет для публикации/выкладки.
 
-На первом этапе не строим Mac-приложение. Сначала фиксируем процесс, источники данных, критерии анализа, ограничения API и MVP-дорожную карту. Этот файл ведем как главный рабочий план.
+На первом этапе не строим Mac-приложение. Рабочая схема: полноценный open-source GitHub-репозиторий, запуск локального веб-интерфейса через `./start.sh`, обновление через `./update.sh`, работа через `localhost`.
+
+Текущий MVP отказался от `yt-dlp`, cookies и браузерного логина для Instagram. Сбор постов/Reels идет через ScrapeCreators API. API-ключ хранится только локально в `data/connections.local.json`; этот путь должен оставаться вне GitHub.
+
+Этот файл ведем как главный рабочий план.
 
 ## 2. Главный принцип продукта
 
@@ -38,6 +42,25 @@
 - Официальный API не заменяет полноценный поиск трендов в Reels/Explore/аудио.
 - Для тренд-радарa понадобится гибрид: официальные API + ручные/полуавтоматические подборки + внешние тренд-источники + собственная база результатов.
 - Серый scraping Instagram надо рассматривать как риск: блокировки, нарушение ToS, нестабильность, юридические проблемы.
+
+Текущее практическое решение для MVP:
+
+- ScrapeCreators `GET /v1/instagram/post` по прямой ссылке на пост/Reels.
+- Параметр `download_media=true`, чтобы получать медиа URL без локальных browser cookies.
+- Текст поста берем из caption-полей ответа API и показываем под media preview со скроллом.
+- API-ключи и workflow `.json` добавляем через вкладку `Подключения`; секреты не коммитим.
+- Входящие медиа сохраняем локально в `input/YYYYMMDD/<import-id>/`; путь `input/` не публикуется в GitHub.
+- Первый кадр видео создается через `ffmpeg-static`, установленный npm-зависимостью, а не через системный `ffmpeg`.
+- Для локального описания кадра используем Ollama + модель `fredrezones55/Gemma-4-Uncensored-HauhauCS-Aggressive:e4b` по умолчанию.
+- Кнопка `Generate prompt` описывает выбранное входящее изображение через Ollama и выводит Ideogram JSON prompt в Log без запуска RunningHub.
+- Кнопка `Image generation` создает Ideogram JSON prompt через Ollama, выводит его в Log, затем отправляет prompt в RunningHub ComfyUI workflow через API.
+- RunningHub задачи создаются на Plus через `instanceType: "plus"`.
+- Workflow для RunningHub должен заканчиваться `SaveImage`, подключенным к финальному изображению. `PreviewImage` показывает результат внутри ComfyUI, но не отдает файлы через `/task/openapi/outputs`. `SaveImage.images` нельзя подключать к `PreviewImage`; нужно подключать к тому же финальному image source, который идет в preview, например к `VAEDecode` или финальной pass-through image ноде.
+- Prompt generation больше не подставляет описание нашей модели и не делает отдельный visibility-pass. Текущий режим: описать выбранную картинку как она видна, вернуть JSON со структурой `high_level_description`, `style_description`, `compositional_deconstruction.background`, `compositional_deconstruction.elements[]`.
+- Для каждого `elements[]` нужен `bbox` в нормализованных координатах 0-1000 в порядке `[y_min, x_min, y_max, x_max]`, чтобы дальше использовать детальную композиционную структуру в Ideogram/ComfyUI.
+- RunningHub настройки: API key, workflow ID, prompt node ID, prompt field name и workflow JSON хранятся локально в `data/connections.local.json`.
+- На каждый выбранный Media элемент сохраняем столько generated images, сколько вернул RunningHub workflow. Если workflow вернул 1 изображение - принимаем 1; если вернул 4 - принимаем 4. Ошибка только если outputs пустой.
+- Выходные изображения сохраняем локально в `output/YYYYMMDD/`; путь `output/` не публикуется в GitHub.
 
 ## 4. Источники поиска трендов
 
@@ -241,6 +264,8 @@ AI помогает:
 Возможные API-блоки:
 
 - image generation: создание фото, вариаций, обложек, backgrounds;
+- локальная генерация visual prompt через Ollama по выбранным элементам из Media;
+- RunningHub API для запуска ComfyUI workflow и получения готовых изображений;
 - image editing: ретушь, замена фона, адаптация одежды/стиля;
 - video generation: короткие Reels, motion shots, transitions;
 - TTS/audio: озвучка, voiceover;
@@ -303,31 +328,35 @@ trend sources -> trend_cards/*.md or .json -> AI analysis -> content_briefs/*.md
 7. Человек выбирает вариант.
 8. Система складывает готовый пакет в `deliveries/ready_to_publish/`.
 
-## 11. Будущее Mac-приложение
+## 11. Open-source локальный web-инструмент
 
-Mac-приложение лучше строить после MVP, когда станет ясно, какие действия реально повторяются каждый день.
+Решение от 2026-06-25:
 
-Решение от 2026-06-24 для первого интерактивного среза:
-
-- идем через Tauri + React;
-- сначала делаем браузерный/React-прототип с hot reload и локальным Node API;
-- первый экран - Studio Workspace;
-- первая функция - импорт Instagram URL через `yt-dlp`;
-- `yt-dlp` запускаем с `--ignore-config --cookies-from-browser chrome`, чтобы не наследовать сторонний пользовательский конфиг и пробовать авторизованные Chrome cookies;
-- для видео извлекаем первый кадр через `ffmpeg`;
+- не строим полноценное Mac-приложение на этом этапе;
+- делаем GitHub-ready open-source репозиторий;
+- запуск: `./start.sh`;
+- обновление: `./update.sh`;
+- интерфейс работает через локальный `localhost`;
+- frontend: React + Vite;
+- backend: локальный Node/Express API;
+- первый экран: `Студия`;
+- отдельный экран: `Подключения`;
+- первая функция: импорт Instagram URL через ScrapeCreators API;
+- cookies, браузерный login и `yt-dlp` для Instagram убираем;
+- для поста/карусели/Reels собираем media URL, video URL, first-frame thumbnail и caption text;
+- caption показываем под media preview в отдельном scroll-поле;
 - снизу показываем галерею импортированных материалов; если пост является каруселью, каждое фото/видео показывается отдельной карточкой;
-- справа оставляем место под будущую генерацию фото/видео и анализ трендов.
-- текущая машина уже имеет Node/npm, `yt-dlp` и `ffmpeg`, но не имеет Rust toolchain; полноценный Tauri wrapper потребует установки Rust перед запуском `tauri dev`.
+- справа оставляем место под будущую генерацию фото/видео и анализ трендов;
+- API-ключи и будущие workflow `.json` храним локально в `data/connections.local.json`;
+- `data/`, `.env*` и `*.local.json` должны оставаться в `.gitignore`.
 
-Вероятная архитектура:
+Вероятная архитектура после роста проекта:
 
-- Tauri Mac app;
 - React + Vite frontend;
-- на первом runnable MVP: Node/Express API для локальных операций;
-- позже: Rust command layer Tauri заменит Node API без изменения основной логики UI;
-- локальное хранение файлов и JSON-индекс на первом MVP;
+- Node/Express API для локальных операций;
+- локальное хранение JSON-индекса на первом MVP;
 - SQLite позже, когда появятся тренды, briefs, generation jobs и история публикаций;
-- Keychain позже для API-ключей;
+- отдельный локальный secret/config layer для API-ключей;
 - локальная media library;
 - экран Import Studio;
 - экран Trend Radar;

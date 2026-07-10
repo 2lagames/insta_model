@@ -4,10 +4,12 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: "127.0.0.1",
     port: 5173,
     proxy: {
-      "/api": "http://localhost:4317",
-      "/media": "http://localhost:4317"
+      "/api": "http://127.0.0.1:4317",
+      "/media": "http://127.0.0.1:4317",
+      "/input": "http://127.0.0.1:4317"
     }
   },
   test: {
@@ -15,4 +17,3 @@ export default defineConfig({
     environment: "node"
   }
 });
-
