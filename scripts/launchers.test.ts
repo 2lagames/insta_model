@@ -46,4 +46,33 @@ describe("cross-platform launchers", () => {
     expect(readme).toContain("http://localhost:5173");
     expect(macosInfo.mode & 0o111).not.toBe(0);
   });
+
+  it("updates safely and starts the project on both platforms", async () => {
+    const [windows, macos, readme, packageJson, macosInfo] = await Promise.all([
+      readFile(join(projectRoot, "update.bat"), "utf8"),
+      readFile(join(projectRoot, "update.command"), "utf8"),
+      readFile(join(projectRoot, "README.md"), "utf8"),
+      readFile(join(projectRoot, "package.json"), "utf8"),
+      stat(join(projectRoot, "update.command"))
+    ]);
+
+    expect(windows).toContain("where git");
+    expect(windows).toContain("where node");
+    expect(windows).toContain("where npm");
+    expect(windows).toContain("git pull --ff-only");
+    expect(windows).toContain("call npm install");
+    expect(windows).toContain("call npm run dev");
+    expect(macos).toContain("command -v git");
+    expect(macos).toContain("command -v node");
+    expect(macos).toContain("command -v npm");
+    expect(macos).toContain("git pull --ff-only");
+    expect(macos).toContain("npm install");
+    expect(macos).toContain("npm run dev");
+    expect(windows).not.toMatch(/taskkill|wmic|Stop-Process/i);
+    expect(macos).not.toMatch(/\bkill\b|pkill|lsof/i);
+    expect(readme).toContain("update.bat");
+    expect(readme).toContain("update.command");
+    expect(JSON.parse(packageJson).version).toBe("0.2.1");
+    expect(macosInfo.mode & 0o111).not.toBe(0);
+  });
 });

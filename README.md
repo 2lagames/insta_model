@@ -19,6 +19,17 @@ Both launchers show a clear message if Node.js/npm is missing. Install the curre
 
 ## Update
 
+Double-click the updater for your operating system:
+
+| System | File |
+| --- | --- |
+| Windows | `update.bat` |
+| macOS | `update.command` |
+
+The updater safely downloads only fast-forward Git updates, installs the required npm dependencies, and starts the local studio. If Git needs manual attention or a prerequisite is missing, the terminal stays open with the error message.
+
+You can also update from a terminal:
+
 ```bash
 ./update.sh
 ```
