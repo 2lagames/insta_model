@@ -1,6 +1,6 @@
 {
   "name": "instagram-import-studio",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": false,
   "license": "MIT",
   "type": "module",
@@ -29,7 +29,7 @@
     "@types/react-dom": "^19.1.6",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
-    "vite": "^7.0.0",
+    "vite": "^7.3.6",
     "vitest": "^3.2.4"
   }
 }
