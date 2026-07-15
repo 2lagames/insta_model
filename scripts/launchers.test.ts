@@ -72,7 +72,7 @@ describe("cross-platform launchers", () => {
     expect(macos).not.toMatch(/\bkill\b|pkill|lsof/i);
     expect(readme).toContain("update.bat");
     expect(readme).toContain("update.command");
-    expect(JSON.parse(packageJson).version).toBe("0.2.2");
+    expect(JSON.parse(packageJson).version).toBe("0.3.0");
     expect(macosInfo.mode & 0o111).not.toBe(0);
   });
 });

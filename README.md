@@ -1,6 +1,6 @@
 # Instagram Import Studio
 
-Local web studio for turning Instagram posts and Reels into reusable source material for a content-production workflow. It downloads photos, carousel items, video first frames, captions, and metadata through ScrapeCreators; prepares structured image prompts locally with Ollama; and can send those prompts to a RunningHub ComfyUI workflow.
+Local web studio for turning Instagram posts, Reels, and local image files into reusable source material for a content-production workflow. It downloads photos, carousel items, video first frames, captions, and metadata through ScrapeCreators; generates editable image prompts with Ollama Cloud or a local Ollama instance; and sends the selected source image and final prompt to a RunningHub ComfyUI workflow running Krea 2.
 
 It is designed for creators who need to revisit the same reference post without repeatedly downloading the same assets. Normal imports reuse healthy local media; use **Обновить заново** only when a fresh download is needed.
 
@@ -39,10 +39,12 @@ You can also update from a terminal:
 Open the `Подключения` tab and save API settings there:
 
 - ScrapeCreators API key for Instagram imports.
-- RunningHub API key for ComfyUI generation.
-- RunningHub workflow ID.
+- Ollama Cloud API key, Cloud/Local mode, model selection, and shared instruction for prompt generation.
+- RunningHub API key and workflow ID for Krea 2 generation.
 - Prompt node ID and prompt field name for replacing the workflow prompt.
-- Workflow `.json` file.
+- Image node ID and image field name for the workflow `LoadImage` node.
+
+API keys are shown in the UI only as a masked preview. Use **Вставить ключ** to edit a key and **Очистить** to remove it. The workflow JSON is managed in RunningHub and is not uploaded to this application.
 
 The key is stored locally in:
 
@@ -54,56 +56,30 @@ data/connections.local.json
 
 ## Import Flow
 
-1. Paste an Instagram post or Reels URL in `Студия`.
-2. Press `Import`.
+1. Paste an Instagram post or Reels URL in `Студия` and press `Import`, or use **Загрузить изображение** to select a local image.
 3. The local API calls ScrapeCreators `GET /v1/instagram/post` with `download_media=true`.
-4. Photos, carousel items, videos, first-frame thumbnails, and caption text appear in the interface.
-5. Downloaded source media is stored under `input/YYYYMMDD/<import-id>/`.
+4. Photos, carousel items, videos, first-frame thumbnails, and caption text appear in the interface. A local image is used as the source without an Instagram link.
+5. Downloaded or uploaded source media is stored under `input/`.
+
+**Сброс** clears the current media session, preview, metadata, and prompt text, but keeps the Studio layout and persistent Generation workspace options. It does not delete files from `input/` or `output/`.
 
 ## Image Prompt Flow
 
 The `Media` panel supports selecting one or more materials for later generation. The active preview and the selected generation queue are separate: click a card to preview it, use `Use` to include it in prompt generation.
 
-Press `Generate prompt` to test local Ollama prompt generation without sending anything to RunningHub.
+Press `Generate prompt` to send the selected source image to the model currently selected in **Ollama Cloud** or **Локальная Ollama**. The shared instruction is edited on the `Подключения` page.
 
-Press `Image generation` to generate the prompt locally through Ollama and then send it to RunningHub. The default model is:
+Each generated prompt is displayed in a large editable field. You can save an edited prompt, undo or redo changes, or reset it to the original Ollama result. Saved prompt text persists when the page is reloaded within the current media session. Image generation automatically saves the latest edited text.
 
-```text
-fredrezones55/Gemma-4-Uncensored-HauhauCS-Aggressive:e4b
-```
+The **Generation workspace** selector stores reusable prefix variants in the format `Название;Текст`, one variant per line. When a variant is selected, the final prompt is `Текст, Image`, where `Image` is the generated or edited Ollama prompt. With **Не выбрано**, the Ollama prompt is used unchanged. These variants are saved in application settings and are not changed by **Сброс**.
 
-The generated prompt is written into `Log`, then sent to RunningHub through `POST /task/openapi/create` using `nodeInfoList` to replace the configured prompt node field. The task payload requests RunningHub Plus with `instanceType: "plus"`.
+Press `Image generation` to upload each selected source image to RunningHub and create a task through `POST /task/openapi/create`. The app uses `nodeInfoList` to replace both the configured prompt node field and the configured `LoadImage` field. The configured workflow generates images with **Krea 2**. The task payload requests RunningHub Plus with `instanceType: "plus"`.
 
 The uploaded ComfyUI workflow must include a `SaveImage` node connected to the final image. `PreviewImage` is useful inside ComfyUI, but it does not expose files through RunningHub `/task/openapi/outputs`, so the app cannot download generated images from preview-only workflows. Do not connect `SaveImage.images` to `PreviewImage`; connect it to the same final image source that feeds preview, for example `VAEDecode` or the final image pass-through node.
 
 After a RunningHub task reaches `SUCCESS`, the app polls outputs up to 12 times by default. Override this with `RUNNINGHUB_OUTPUT_MAX_POLLS` if RunningHub needs more time to expose saved files.
 
-Prompt output format is valid JSON shaped for Ideogram 4 prompting:
-
-```json
-{
-  "high_level_description": "One or two sentence visual summary of the input image.",
-  "style_description": {
-    "aesthetics": "Concise visual aesthetic keywords.",
-    "lighting": "Concrete lighting description.",
-    "photo": "Camera angle, crop, lens/perspective, and shot type.",
-    "medium": "photograph",
-    "color_palette": ["#F5F0E8", "#B69B7A", "#2F2A24"]
-  },
-  "compositional_deconstruction": {
-    "background": "Environment and background description.",
-    "elements": [
-      {
-        "type": "obj",
-        "bbox": [330, 80, 940, 890],
-        "desc": "Detailed description of one visible subject, object, prop, garment, body area, or environmental element."
-      }
-    ]
-  }
-}
-```
-
-`bbox` values are normalized integer coordinates from 0 to 1000 in `[y_min, x_min, y_max, x_max]` order. Prompt generation describes the selected input image as it is visible; it no longer applies a saved target model identity or hidden-trait replacement pass.
+Prompt generation returns ordinary editable text. The exact wording and detail level are controlled by the shared Ollama instruction, so the same application can work with different Ollama vision models.
 
 The app saves every image returned by RunningHub for each selected Media item. If your workflow returns 1 image, the app saves 1; if it returns 4 images, the app saves all 4. The only invalid result is an empty output list.
 
