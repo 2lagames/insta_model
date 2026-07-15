@@ -814,25 +814,21 @@ function Preview({
   materials: MediaMaterial[];
   setPromptDocuments: React.Dispatch<React.SetStateAction<PromptDocument[]>>;
 }) {
-  if (!selected) {
-    return <div className="preview-empty">Import an Instagram post or reel to preview media here.</div>;
-  }
-
-  const { importItem } = selected;
-  const imageSource = selected.files.image ?? selected.files.firstFrame ?? selected.files.thumbnail;
+  const importItem = selected?.importItem;
+  const imageSource = selected?.files.image ?? selected?.files.firstFrame ?? selected?.files.thumbnail;
 
   return (
     <div className="preview-content">
       <div className="preview-main">
         <div className="preview-column"><div className="panel-label">Preview</div>
         <div className="media-stage">
-          {selected.files.video ? (
+          {selected?.files.video ? (
             <video controls poster={selected.files.firstFrame ?? selected.files.thumbnail} src={selected.files.video} />
-          ) : imageSource ? (
+          ) : imageSource && importItem ? (
             <img alt={importItem.title ?? "Imported Instagram media"} src={imageSource} />
-          ) : (
+          ) : selected ? (
             <div className="preview-empty">No preview file was generated for this import.</div>
-          )}
+          ) : null}
         </div>
         </div>
         <MediaSelector materials={materials} onSelect={onSelectMaterial} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
@@ -840,28 +836,28 @@ function Preview({
           <div className="info-content">
             <section className="caption-panel">
               <div className="panel-label">Text</div>
-              <div className="caption-text">{importItem.caption || "No caption text returned for this media."}</div>
+              <div className="caption-text">{importItem?.caption ?? ""}</div>
             </section>
             <dl className="metadata-grid">
               <div>
                 <dt>Source kind</dt>
-                <dd>{importItem.sourceKind ?? "post"}</dd>
+                <dd>{importItem?.sourceKind ?? ""}</dd>
               </div>
               <div>
                 <dt>Type</dt>
-                <dd>{selected.mediaType}</dd>
+                <dd>{selected?.mediaType ?? ""}</dd>
               </div>
               <div>
                 <dt>Status</dt>
-                <dd>{importItem.status}</dd>
+                <dd>{importItem?.status ?? ""}</dd>
               </div>
               <div>
                 <dt>Imported</dt>
-                <dd>{new Date(importItem.createdAt).toLocaleString()}</dd>
+                <dd>{importItem ? new Date(importItem.createdAt).toLocaleString() : ""}</dd>
               </div>
               <div>
                 <dt>Source</dt>
-                <dd>{importItem.sourceUrl.startsWith("local://") ? "Локальное изображение — ссылка Instagram отсутствует" : <a href={importItem.sourceUrl} rel="noreferrer" target="_blank">Open Instagram link</a>}</dd>
+                <dd>{importItem ? (importItem.sourceUrl.startsWith("local://") ? "Локальное изображение — ссылка Instagram отсутствует" : <a href={importItem.sourceUrl} rel="noreferrer" target="_blank">Open Instagram link</a>) : ""}</dd>
               </div>
             </dl>
           </div>

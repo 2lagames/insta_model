@@ -63,6 +63,22 @@ describe("studio preview layout", () => {
     expect(cssSource).not.toContain("overflow-y: auto");
   });
 
+  it("keeps the Studio workspace visible after the selected media is cleared", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const previewStart = appSource.indexOf("function Preview({");
+    const preview = appSource.slice(previewStart, appSource.indexOf("function parseGenerationPrefixes", previewStart));
+
+    expect(preview).not.toContain("if (!selected) {");
+    expect(preview).toContain('<div className="preview-content">');
+    expect(preview).toContain("<MediaSelector");
+    expect(preview).toContain("<GenerationWorkspace");
+
+    const resetStart = appSource.indexOf("async function handleResetMediaSession()");
+    const reset = appSource.slice(resetStart, appSource.indexOf("async function handleGenerateImagePrompts", resetStart));
+    expect(reset).not.toContain("setGenerationPrefixOptions");
+    expect(reset).not.toContain("setGenerationPrefixSelection");
+  });
+
   it("offers explicit prompt saving and describes a local image source", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
 
