@@ -41,6 +41,15 @@ describe("image prompt activity", () => {
     expect(source).toContain("store.cleanupDuplicateInstagramImports()");
   });
 
+  it("opens the generated output folder from the Studio toolbar", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+    const routeStart = source.indexOf('app.post("/api/open-imports-folder"');
+    const route = source.slice(routeStart, source.indexOf('app.post("/api/generation/image-prompts"', routeStart));
+
+    expect(route).toContain("await mkdir(outputDir, { recursive: true })");
+    expect(route).toContain('spawn("open", [outputDir]');
+  });
+
   it("generates separate prompts from the active persisted Ollama configuration", () => {
     const source = readFileSync("server/index.ts", "utf8");
     const promptRouteStart = source.indexOf('app.post("/api/generation/image-prompts"');

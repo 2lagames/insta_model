@@ -269,9 +269,9 @@ app.post("/api/imports/check", async (request, response) => {
 
 app.post("/api/open-imports-folder", async (_request, response) => {
   try {
-    await mkdir(inputDir, { recursive: true });
+    await mkdir(outputDir, { recursive: true });
     const { spawn } = await import("node:child_process");
-    spawn("open", [inputDir], { detached: true, stdio: "ignore" }).unref();
+    spawn("open", [outputDir], { detached: true, stdio: "ignore" }).unref();
     response.json({ ok: true });
   } catch (error) {
     response.status(500).json({ error: toErrorMessage(error) });
