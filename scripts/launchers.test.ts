@@ -1,9 +1,87 @@
-import { readFile, stat } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const portCleanupScript = join(projectRoot, "scripts", "free-local-ports.sh");
+
+async function runPortCleanup(scenario: "none" | "graceful" | "forced" | "blocked") {
+  const fakeBinDirectory = await mkdtemp(join(tmpdir(), "instagram-launcher-bin-"));
+  const stateDirectory = await mkdtemp(join(tmpdir(), "instagram-launcher-state-"));
+  const writeExecutable = async (name: string, contents: string) => {
+    const filePath = join(fakeBinDirectory, name);
+    await writeFile(filePath, contents, "utf8");
+    await chmod(filePath, 0o755);
+  };
+
+  await writeExecutable("lsof", `#!/usr/bin/env bash
+case "$SCENARIO" in
+  none) exit 0 ;;
+  graceful) [ -f "$STATE_DIRECTORY/stopped" ] || echo 101 ;;
+  forced) [ -f "$STATE_DIRECTORY/forced" ] || echo 202 ;;
+  blocked) echo 303 ;;
+esac
+`);
+  await writeExecutable("sleep", "#!/usr/bin/env bash\nexit 0\n");
+  const bashEnvironment = join(fakeBinDirectory, "bash-env");
+  await writeFile(bashEnvironment, `kill() {
+  printf '%s\\n' "$*" >> "$STATE_DIRECTORY/kills"
+  case "$*" in
+    *-KILL*) touch "$STATE_DIRECTORY/forced" ;;
+    *) touch "$STATE_DIRECTORY/stopped" ;;
+  esac
+}
+`, "utf8");
+
+  try {
+    return spawnSync("bash", [portCleanupScript], {
+      cwd: projectRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${fakeBinDirectory}:${process.env.PATH}`,
+        BASH_ENV: bashEnvironment,
+        SCENARIO: scenario,
+        STATE_DIRECTORY: stateDirectory
+      }
+    });
+  } finally {
+    await rm(fakeBinDirectory, { force: true, recursive: true });
+    await rm(stateDirectory, { force: true, recursive: true });
+  }
+}
+
+describe("Unix launcher port cleanup", () => {
+  it("starts when neither local application port has a listener", async () => {
+    const result = await runPortCleanup("none");
+
+    expect(result.status).toBe(0);
+  });
+
+  it("stops a listener with a normal termination signal", async () => {
+    const result = await runPortCleanup("graceful");
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Stopping old local process on port 4317: 101");
+  });
+
+  it("forces termination only when a listener remains after the wait", async () => {
+    const result = await runPortCleanup("forced");
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Force stopping old local process on port 4317: 202");
+  });
+
+  it("prevents startup when a listener remains after forced termination", async () => {
+    const result = await runPortCleanup("blocked");
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Port 4317 is still in use");
+  });
+});
 
 describe("cross-platform launchers", () => {
   it("keeps npm run dev in a visible terminal on both platforms", async () => {
