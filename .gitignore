@@ -1,6 +1,7 @@
 .superpowers/
 .agents/
 .codex/
+.worktrees/
 AGENTS.md
 CLAUDE.md
 GEMINI.md
