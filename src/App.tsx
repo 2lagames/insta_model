@@ -614,17 +614,16 @@ export default function App() {
             <KeyActions disabled={isLoadingKey} onClear={() => void handleClearKey("scrapeCreatorsApiKey")} onEdit={() => void handleEditKey("scrapeCreatorsApiKey")} />
           </div>
           <div className="connection-card ollama-card">
-            <div>
+            <div className="ollama-settings">
               <h2>Ollama</h2>
               <div className="provider-toggle" role="group" aria-label="Источник Ollama">
                 <button className={ollamaProvider === "cloud" ? "active" : ""} onClick={() => setOllamaProvider("cloud")} type="button">Ollama Cloud</button>
                 <button className={ollamaProvider === "local" ? "active" : ""} onClick={() => setOllamaProvider("local")} type="button">Локальная Ollama</button>
               </div>
               <KeyStatus hasKey={connections.hasOllamaCloudApiKey === true} preview={connections.ollamaCloudApiKeyPreview} />
-            </div>
-            <div className="connections-grid">
-              <div className="key-actions"><KeyActions disabled={isLoadingKey} onClear={() => void handleClearKey("ollamaCloudApiKey")} onEdit={() => void handleEditKey("ollamaCloudApiKey")} /></div>
-              <label>
+              <KeyActions disabled={isLoadingKey} onClear={() => void handleClearKey("ollamaCloudApiKey")} onEdit={() => void handleEditKey("ollamaCloudApiKey")} />
+              <div className="ollama-models">
+                <label>
                 <span>Cloud model</span>
                 <div className="model-control">
                   <select disabled={!connections.hasOllamaCloudApiKey} onChange={(event) => setOllamaCloudModel(event.target.value)} value={ollamaCloudModel}>
@@ -634,7 +633,7 @@ export default function App() {
                   <button aria-label="Обновить модели Ollama Cloud" disabled={!connections.hasOllamaCloudApiKey || isRefreshingCloudModels} onClick={() => void refreshOllamaModels("cloud")} type="button">↻</button>
                 </div>
               </label>
-              <label>
+                <label>
                 <span>Local model</span>
                 <div className="model-control">
                   <select onChange={(event) => setOllamaLocalModel(event.target.value)} value={ollamaLocalModel}>
@@ -644,11 +643,12 @@ export default function App() {
                   <button aria-label="Обновить модели локальной Ollama" disabled={isRefreshingLocalModels} onClick={() => void refreshOllamaModels("local")} type="button">↻</button>
                 </div>
               </label>
-              <label className="instruction-control">
-                <span>Промт для генерации</span>
-                <textarea onChange={(event) => setOllamaPromptInstruction(event.target.value)} placeholder="Инструкция для генерации промта" rows={8} value={ollamaPromptInstruction} />
-              </label>
+              </div>
             </div>
+            <label className="instruction-control">
+              <span>Промт для генерации</span>
+              <textarea onChange={(event) => setOllamaPromptInstruction(event.target.value)} placeholder="Инструкция для генерации промта" rows={8} value={ollamaPromptInstruction} />
+            </label>
           </div>
           <div className="connection-card runninghub-card">
             <div>

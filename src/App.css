@@ -503,7 +503,7 @@ input {
 }
 
 .ollama-card {
-  grid-template-columns: minmax(300px, 0.9fr) minmax(520px, 1.1fr);
+  grid-template-columns: minmax(560px, 0.95fr) minmax(420px, 1.05fr);
   align-items: start;
 }
 
@@ -516,20 +516,20 @@ input {
   justify-self: start;
 }
 
-.ollama-card > .connections-grid {
-  grid-template-columns: minmax(180px, 240px) minmax(180px, 240px) minmax(320px, 1fr);
-  align-items: start;
+.ollama-settings {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
 }
 
-.ollama-card .key-actions {
-  align-content: start;
-  flex-direction: column;
-  align-items: stretch;
+.ollama-settings > .key-actions {
+  align-self: start;
 }
 
-.ollama-card .instruction-control {
-  grid-column: 3;
-  grid-row: 1 / span 2;
+.ollama-models {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 12px;
 }
 
 .runninghub-card .connections-grid {
