@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, extname, join, relative, resolve } from "node:path";
 import express from "express";
 import type { ImportAsset, ImportItem } from "../src/lib/importTypes";
@@ -8,6 +8,7 @@ import { ConnectionsStore, type ConnectionKeyName } from "./connectionsStore";
 import { type PromptMediaInput } from "./ideogramPrompt";
 import { ImportStore, normalizeCurrentSession } from "./importStore";
 import { checkScrapeCreatorsPostAccess, importInstagramUrl } from "./instagramImporter";
+import { resolveImportMetadataPath } from "./localMetadata";
 import { generateOllamaPrompt, listOllamaModels } from "./ollamaClient";
 import { getActiveOllamaConfiguration } from "./ollamaConfiguration";
 import { runRunningHubImageGeneration } from "./runningHub";
@@ -23,9 +24,27 @@ const activityLog = new ActivityLog();
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
-app.use("/media", express.static(dataDir));
 app.use("/input", express.static(inputDir));
 app.use("/output", express.static(outputDir));
+
+app.get("/media/imports/:importId/scrapecreators-response.json", async (request, response) => {
+  const metadataPath = resolveImportMetadataPath(dataDir, request.params.importId);
+  if (!metadataPath) {
+    response.sendStatus(404);
+    return;
+  }
+
+  try {
+    await access(metadataPath);
+    response.sendFile(metadataPath);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      response.sendStatus(404);
+      return;
+    }
+    response.status(500).json({ error: toErrorMessage(error) });
+  }
+});
 
 app.get("/api/health", (_request, response) => {
   response.json({
@@ -89,8 +108,6 @@ app.get("/api/connections", async (_request, response) => {
 app.put("/api/connections", async (request, response) => {
   try {
     await connectionsStore.save({
-      scrapeCreatorsApiKey: optionalString(request.body?.scrapeCreatorsApiKey),
-      ollamaCloudApiKey: optionalString(request.body?.ollamaCloudApiKey),
       ollamaProvider: request.body?.ollamaProvider === "cloud" || request.body?.ollamaProvider === "local"
         ? request.body.ollamaProvider
         : undefined,
@@ -99,7 +116,6 @@ app.put("/api/connections", async (request, response) => {
       ollamaPromptInstruction: optionalString(request.body?.ollamaPromptInstruction),
       generationPrefixOptions: optionalString(request.body?.generationPrefixOptions),
       generationPrefixSelection: optionalString(request.body?.generationPrefixSelection),
-      runningHubApiKey: optionalString(request.body?.runningHubApiKey),
       runningHubWorkflowId: optionalString(request.body?.runningHubWorkflowId),
       runningHubPromptNodeId: optionalString(request.body?.runningHubPromptNodeId),
       runningHubPromptFieldName: optionalString(request.body?.runningHubPromptFieldName),
@@ -109,15 +125,6 @@ app.put("/api/connections", async (request, response) => {
     response.json(await connectionsStore.readPublic());
   } catch (error) {
     response.status(500).json({ error: toErrorMessage(error) });
-  }
-});
-
-app.get("/api/connections/keys/:keyName", async (request, response) => {
-  try {
-    const keyName = parseConnectionKeyName(request.params.keyName);
-    response.json({ key: await connectionsStore.readKey(keyName) ?? "" });
-  } catch (error) {
-    response.status(400).json({ error: toErrorMessage(error) });
   }
 });
 
@@ -394,6 +401,10 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }
 
 function formatDateFolder(date: Date): string {

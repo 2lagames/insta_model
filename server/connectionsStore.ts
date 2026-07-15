@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { defaultPromptInstruction } from "./ideogramPrompt";
 
@@ -50,6 +50,7 @@ export class ConnectionsStore {
 
   async readPrivate(): Promise<PrivateConnections> {
     try {
+      await this.ensurePrivateFilePermissions();
       const raw = await readFile(this.filePath, "utf8");
       return JSON.parse(raw) as PrivateConnections;
     } catch (error) {
@@ -87,16 +88,10 @@ export class ConnectionsStore {
     };
   }
 
-  async readKey(keyName: ConnectionKeyName): Promise<string | undefined> {
-    const connections = await this.readPrivate();
-    return connections[keyName]?.trim() || undefined;
-  }
-
   async saveKey(keyName: ConnectionKeyName, value: string): Promise<void> {
     const trimmed = value.trim();
     if (!trimmed) {
-      await this.clearKey(keyName);
-      return;
+      throw new Error("API key cannot be blank. Use Clear to remove the saved key.");
     }
 
     const current = await this.readPrivate();
@@ -150,7 +145,14 @@ export class ConnectionsStore {
 
   private async write(data: PrivateConnections): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify(data, null, 2), "utf8");
+    await writeFile(this.filePath, JSON.stringify(data, null, 2), { encoding: "utf8", mode: 0o600 });
+    await this.ensurePrivateFilePermissions();
+  }
+
+  private async ensurePrivateFilePermissions(): Promise<void> {
+    if (process.platform !== "win32") {
+      await chmod(this.filePath, 0o600);
+    }
   }
 }
 

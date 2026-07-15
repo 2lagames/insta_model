@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createPromptTextRecord,
   createPromptDocuments,
   editPromptDocument,
   getCurrentPrompt,
@@ -32,6 +33,19 @@ describe("prompt documents", () => {
         historyIndex: 0,
       },
     ]);
+  });
+
+  it("serializes the current value of every prompt for local persistence", () => {
+    const initial = createPromptDocuments([
+      { mediaId: "media-1", label: "Image", prompt: "original" },
+      { mediaId: "media-2", label: "Video", prompt: "second" },
+    ]);
+    const edited = editPromptDocument(initial, "media-1", "prefix, revised");
+
+    expect(createPromptTextRecord(edited)).toEqual({
+      "media-1": "prefix, revised",
+      "media-2": "second",
+    });
   });
 
   it("undoes an edit back to the original prompt", () => {

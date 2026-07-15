@@ -42,6 +42,10 @@ export function getCurrentPrompt(document: PromptDocument): string {
   return document.history[document.historyIndex];
 }
 
+export function createPromptTextRecord(documents: PromptDocument[]): Record<string, string> {
+  return Object.fromEntries(documents.map((document) => [document.mediaId, getCurrentPrompt(document)]));
+}
+
 export function editPromptDocument(
   documents: PromptDocument[],
   mediaId: string,

@@ -44,7 +44,7 @@ Open the `Подключения` tab and save API settings there:
 - Prompt node ID and prompt field name for replacing the workflow prompt.
 - Image node ID and image field name for the workflow `LoadImage` node.
 
-API keys are shown in the UI only as a masked preview. Use **Вставить ключ** to edit a key and **Очистить** to remove it. The workflow JSON is managed in RunningHub and is not uploaded to this application.
+API keys are shown in the UI only as a masked preview. Use **Вставить ключ** to replace a key and **Очистить** to remove it. The replacement field is always empty: the saved raw key is never loaded into the browser. The workflow JSON is managed in RunningHub and is not uploaded to this application.
 
 The key is stored locally in:
 
@@ -52,7 +52,9 @@ The key is stored locally in:
 data/connections.local.json
 ```
 
-`data/`, `input/`, `output/`, and `*.local.json` are ignored by git, so secrets and generated/imported media should not be published to GitHub.
+`data/`, `input/`, `output/`, and `*.local.json` are ignored by git. On macOS and Linux, `connections.local.json` is created and repaired with owner-only `0600` permissions. The local API does not publish this file or the session index; only an allowlisted ScrapeCreators metadata response can be opened through `/media/imports/...`.
+
+Local persistence does not prevent the configured integrations from receiving data required to perform their work. ScrapeCreators, Ollama Cloud, and RunningHub receive their API keys when called; prompt instructions, selected images, workflow settings, and final prompts are sent only to the selected generation service, not to GitHub.
 
 ## Import Flow
 
@@ -69,7 +71,7 @@ The `Media` panel supports selecting one or more materials for later generation.
 
 Press `Generate prompt` to send the selected source image to the model currently selected in **Ollama Cloud** or **Локальная Ollama**. The shared instruction is edited on the `Подключения` page.
 
-Each generated prompt is displayed in a large editable field. You can save an edited prompt, undo or redo changes, or reset it to the original Ollama result. Saved prompt text persists when the page is reloaded within the current media session. Image generation automatically saves the latest edited text.
+Each generated prompt is displayed in a large editable field. Typing, undo, redo, reset, and an applied Generation workspace prefix are saved to the local current session after a short pause. You can also press **Сохранить** explicitly. Saved prompt text persists when the page is reloaded within the current media session, and image generation saves the exact latest text before sending it to RunningHub.
 
 The **Generation workspace** selector stores reusable prefix variants in the format `Название;Текст`, one variant per line. When a variant is selected, the final prompt is `Текст, Image`, where `Image` is the generated or edited Ollama prompt. With **Не выбрано**, the Ollama prompt is used unchanged. These variants are saved in application settings and are not changed by **Сброс**.
 
@@ -96,7 +98,10 @@ They also appear as a new `Media` item in the current UI session.
 ```bash
 npm install
 npm run dev
+npm run check:secrets
 npm run check
 ```
+
+`npm run dev` configures the tracked `.githooks/pre-commit` hook for this checkout. The hook scans staged content, tracked files, and new non-ignored files for private runtime paths, common credential signatures, and exact locally saved API-key values. `npm run check` runs the same secret check before tests and the production build.
 
 The frontend is React/Vite. The local API is Express.

@@ -4,7 +4,6 @@ import {
   cleanupDuplicateImports,
   generateImagePrompts,
   generateImages,
-  getConnectionKey,
   importInstagramUrl,
   listOllamaModels,
   listImports,
@@ -166,24 +165,21 @@ describe("connections API", () => {
 
   it("uses dedicated key routes and requests Ollama models for the selected provider", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ key: "cloud-key" })))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })))
       .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: "gemma3" }] })));
 
-    await expect(getConnectionKey("ollamaCloudApiKey")).resolves.toBe("cloud-key");
     await expect(saveConnectionKey("ollamaCloudApiKey", "replacement-key")).resolves.toBeUndefined();
     await expect(clearConnectionKey("ollamaCloudApiKey")).resolves.toBeUndefined();
     await expect(listOllamaModels("cloud")).resolves.toEqual([{ name: "gemma3" }]);
 
-    expect(fetchSpy).toHaveBeenNthCalledWith(1, "/api/connections/keys/ollamaCloudApiKey");
-    expect(fetchSpy).toHaveBeenNthCalledWith(2, "/api/connections/keys/ollamaCloudApiKey", {
+    expect(fetchSpy).toHaveBeenNthCalledWith(1, "/api/connections/keys/ollamaCloudApiKey", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key: "replacement-key" })
     });
-    expect(fetchSpy).toHaveBeenNthCalledWith(3, "/api/connections/keys/ollamaCloudApiKey", { method: "DELETE" });
-    expect(fetchSpy).toHaveBeenNthCalledWith(4, "/api/ollama/models?provider=cloud");
+    expect(fetchSpy).toHaveBeenNthCalledWith(2, "/api/connections/keys/ollamaCloudApiKey", { method: "DELETE" });
+    expect(fetchSpy).toHaveBeenNthCalledWith(3, "/api/ollama/models?provider=cloud");
   });
 });
 

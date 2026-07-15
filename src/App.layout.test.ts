@@ -98,4 +98,26 @@ describe("studio preview layout", () => {
     expect(appSource).not.toContain("window.prompt");
     expect(appSource.indexOf("<GenerationPrefixDialog")).toBeLessThan(appSource.indexOf("<LogPanel"));
   });
+
+  it("replaces API keys without loading their raw value into the browser", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+
+    expect(appSource).not.toContain("getConnectionKey");
+    expect(appSource).not.toContain("editingKeyValue");
+    expect(appSource).toContain('type="password"');
+    expect(appSource).toContain('autoComplete="new-password"');
+  });
+
+  it("debounces local prompt autosaves and invalidates them when the media session changes", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+
+    expect(appSource).toContain("createPromptTextRecord");
+    expect(appSource).toContain("promptAutosaveRevisionRef");
+    expect(appSource).toContain("isPromptAutosaveReadyRef");
+    expect(appSource).toContain("window.setTimeout");
+    expect(appSource).toContain("}, 600)");
+    expect(appSource).toContain("saveSessionPrompts(prompts)");
+    expect(appSource.match(/promptAutosaveRevisionRef\.current \+= 1/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(appSource.match(/isPromptAutosaveReadyRef\.current = true/g)?.length).toBeGreaterThanOrEqual(4);
+  });
 });

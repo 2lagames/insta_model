@@ -89,15 +89,12 @@ export type OllamaModel = {
 };
 
 export type ConnectionSaveInput = {
-  scrapeCreatorsApiKey?: string;
-  ollamaCloudApiKey?: string;
   ollamaProvider?: "cloud" | "local";
   ollamaCloudModel?: string;
   ollamaLocalModel?: string;
   ollamaPromptInstruction?: string;
   generationPrefixOptions?: string;
   generationPrefixSelection?: string;
-  runningHubApiKey?: string;
   runningHubWorkflowId?: string;
   runningHubPromptNodeId?: string;
   runningHubPromptFieldName?: string;
@@ -165,13 +162,6 @@ export async function saveConnections(input: ConnectionSaveInput): Promise<Publi
   });
   await assertOk(response);
   return await response.json() as PublicConnections;
-}
-
-export async function getConnectionKey(keyName: ConnectionKeyName): Promise<string> {
-  const response = await apiFetch(`/api/connections/keys/${keyName}`);
-  await assertOk(response);
-  const data = await response.json() as { key?: string };
-  return data.key ?? "";
 }
 
 export async function saveConnectionKey(keyName: ConnectionKeyName, key: string): Promise<void> {

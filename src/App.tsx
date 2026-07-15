@@ -4,7 +4,6 @@ import {
   clearConnectionKey,
   generateImagePrompts,
   generateImages,
-  getConnectionKey,
   getConnections,
   getHealth,
   importInstagramUrl,
@@ -24,6 +23,7 @@ import { validateInstagramUrl } from "./lib/instagramUrl";
 import { createMediaMaterials, createSessionMediaMaterials, type MediaMaterial } from "./lib/mediaMaterials";
 import { toggleMediaSelection } from "./lib/mediaSelection";
 import {
+  createPromptTextRecord,
   editPromptDocument,
   getCurrentPrompt,
   mergePromptDocuments,
@@ -85,8 +85,7 @@ export default function App() {
     hasRunningHubApiKey: false
   });
   const [editingKey, setEditingKey] = useState<ConnectionKeyName | null>(null);
-  const [editingKeyValue, setEditingKeyValue] = useState("");
-  const [isLoadingKey, setIsLoadingKey] = useState(false);
+  const [isSavingKey, setIsSavingKey] = useState(false);
   const [runningHubWorkflowId, setRunningHubWorkflowId] = useState("");
   const [runningHubPromptNodeId, setRunningHubPromptNodeId] = useState("");
   const [runningHubPromptFieldName, setRunningHubPromptFieldName] = useState("text");
@@ -105,6 +104,8 @@ export default function App() {
   const [isRefreshingLocalModels, setIsRefreshingLocalModels] = useState(false);
   const [isSavingConnections, setIsSavingConnections] = useState(false);
   const [promptDocuments, setPromptDocuments] = useState<PromptDocument[]>([]);
+  const promptAutosaveRevisionRef = useRef(0);
+  const isPromptAutosaveReadyRef = useRef(false);
 
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedItemId) ?? (isMediaSessionReset ? undefined : items[0]),
@@ -179,6 +180,7 @@ export default function App() {
       .then((loadedSession) => {
         setItems(loadedSession.items);
         setCurrentSession(loadedSession.session);
+        isPromptAutosaveReadyRef.current = true;
         setPromptDocuments(mergePromptDocuments([], Object.entries(loadedSession.session.promptTexts ?? {}).map(([mediaId, prompt]) => ({ mediaId, label: mediaId, prompt }))));
         const sessionItemIds = loadedSession.session.itemIds;
         const firstSessionItem = sessionItemIds.length > 0
@@ -220,6 +222,36 @@ export default function App() {
     void refreshOllamaModels("local", true);
   }, []);
 
+  useEffect(() => {
+    if (!isPromptAutosaveReadyRef.current || promptDocuments.length === 0) {
+      return;
+    }
+
+    const revision = promptAutosaveRevisionRef.current;
+    const prompts = createPromptTextRecord(promptDocuments);
+    const timeout = window.setTimeout(() => {
+      if (revision !== promptAutosaveRevisionRef.current) {
+        return;
+      }
+
+      void saveSessionPrompts(prompts)
+        .then((session) => {
+          if (revision !== promptAutosaveRevisionRef.current) {
+            return;
+          }
+          setCurrentSession(session);
+          setSessionMediaItemIds(session.itemIds);
+        })
+        .catch((error: unknown) => {
+          if (revision === promptAutosaveRevisionRef.current) {
+            recordStatus({ tone: "error", message: `Could not autosave prompt locally: ${toErrorMessage(error)}` });
+          }
+        });
+    }, 600);
+
+    return () => window.clearTimeout(timeout);
+  }, [promptDocuments]);
+
   async function handleImport(forceRefresh = false) {
     if (!isBackendCurrent) {
       recordStatus({
@@ -235,6 +267,7 @@ export default function App() {
       return;
     }
 
+    promptAutosaveRevisionRef.current += 1;
     setIsImporting(true);
     recordStatus({
       tone: "running",
@@ -246,7 +279,9 @@ export default function App() {
     try {
       const imported = await importInstagramUrl(validation.url, { forceRefresh });
       const importedItem = imported.item;
+      isPromptAutosaveReadyRef.current = true;
       setCurrentSession(imported.session);
+      setPromptDocuments(mergePromptDocuments([], Object.entries(imported.session.promptTexts ?? {}).map(([mediaId, prompt]) => ({ mediaId, label: mediaId, prompt }))));
       setItems((current) => [importedItem, ...current.filter((item) => item.id !== importedItem.id)]);
       const importedMedia = createMediaMaterials(importedItem);
       setSelectedItemId(importedItem.id);
@@ -297,10 +332,12 @@ export default function App() {
 
   async function handleLocalImageUpload(file: File | undefined) {
     if (!file) return;
+    promptAutosaveRevisionRef.current += 1;
     setIsImporting(true);
     try {
       const imported = await uploadLocalImage(file);
       const importedMedia = createMediaMaterials(imported.item);
+      isPromptAutosaveReadyRef.current = true;
       setCurrentSession(imported.session);
       setItems((current) => [imported.item, ...current.filter((item) => item.id !== imported.item.id)]);
       setSelectedItemId(imported.item.id);
@@ -325,8 +362,10 @@ export default function App() {
   }
 
   async function handleResetMediaSession() {
+    promptAutosaveRevisionRef.current += 1;
     try {
       const resetSession = await resetMediaSession();
+      isPromptAutosaveReadyRef.current = true;
       setCurrentSession(resetSession);
       setSessionMediaItemIds(resetSession.itemIds);
       setSelectedItemId(null);
@@ -487,16 +526,8 @@ export default function App() {
     }
   }
 
-  async function handleEditKey(keyName: ConnectionKeyName) {
-    setIsLoadingKey(true);
-    try {
-      setEditingKeyValue(await getConnectionKey(keyName));
-      setEditingKey(keyName);
-    } catch (error) {
-      recordStatus({ tone: "error", message: toErrorMessage(error) });
-    } finally {
-      setIsLoadingKey(false);
-    }
+  function handleEditKey(keyName: ConnectionKeyName) {
+    setEditingKey(keyName);
   }
 
   async function handleSaveKey(value: string) {
@@ -504,6 +535,7 @@ export default function App() {
       return;
     }
 
+    setIsSavingKey(true);
     try {
       await saveConnectionKey(editingKey, value);
       const saved = await getConnections();
@@ -515,10 +547,13 @@ export default function App() {
       recordStatus({ tone: "ready", message: "API key saved locally." });
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
+    } finally {
+      setIsSavingKey(false);
     }
   }
 
   async function handleClearKey(keyName: ConnectionKeyName) {
+    setIsSavingKey(true);
     try {
       await clearConnectionKey(keyName);
       const saved = await getConnections();
@@ -529,6 +564,8 @@ export default function App() {
       recordStatus({ tone: "ready", message: "API key cleared locally." });
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
+    } finally {
+      setIsSavingKey(false);
     }
   }
 
@@ -676,7 +713,7 @@ export default function App() {
               <h2>ScrapeCreators</h2>
               <KeyStatus hasKey={connections.hasScrapeCreatorsApiKey} preview={connections.scrapeCreatorsApiKeyPreview} />
             </div>
-            <KeyActions disabled={isLoadingKey} onClear={() => void handleClearKey("scrapeCreatorsApiKey")} onEdit={() => void handleEditKey("scrapeCreatorsApiKey")} />
+            <KeyActions disabled={isSavingKey} onClear={() => void handleClearKey("scrapeCreatorsApiKey")} onEdit={() => handleEditKey("scrapeCreatorsApiKey")} />
           </div>
           <div className="connection-card ollama-card">
             <div className="ollama-settings">
@@ -686,7 +723,7 @@ export default function App() {
                 <button className={ollamaProvider === "local" ? "active" : ""} onClick={() => setOllamaProvider("local")} type="button">Локальная Ollama</button>
               </div>
               <KeyStatus hasKey={connections.hasOllamaCloudApiKey === true} preview={connections.ollamaCloudApiKeyPreview} />
-              <KeyActions disabled={isLoadingKey} onClear={() => void handleClearKey("ollamaCloudApiKey")} onEdit={() => void handleEditKey("ollamaCloudApiKey")} />
+              <KeyActions disabled={isSavingKey} onClear={() => void handleClearKey("ollamaCloudApiKey")} onEdit={() => handleEditKey("ollamaCloudApiKey")} />
               <div className="ollama-models">
                 <label>
                 <span>Cloud model</span>
@@ -720,7 +757,7 @@ export default function App() {
               <h2>RunningHub ComfyUI</h2>
               <KeyStatus hasKey={connections.hasRunningHubApiKey} preview={connections.runningHubApiKeyPreview} />
             </div>
-            <KeyActions disabled={isLoadingKey} onClear={() => void handleClearKey("runningHubApiKey")} onEdit={() => void handleEditKey("runningHubApiKey")} />
+            <KeyActions disabled={isSavingKey} onClear={() => void handleClearKey("runningHubApiKey")} onEdit={() => handleEditKey("runningHubApiKey")} />
             <div className="connections-grid">
               <label>
                 <span>Workflow ID</span>
@@ -768,9 +805,9 @@ export default function App() {
             {isSavingConnections ? "Saving" : "Save"}
           </button>
           <div className="connection-note">
-            Ключ хранится в локальном файле data/connections.local.json. Этот путь добавлен в .gitignore.
+            Ключ хранится только в локальном data/connections.local.json с закрытыми правами доступа и не загружается обратно в браузер.
           </div>
-          {editingKey ? <KeyEditDialog integration={getIntegrationName(editingKey)} onClose={() => setEditingKey(null)} onSave={handleSaveKey} savedValue={editingKeyValue} /> : null}
+          {editingKey ? <KeyEditDialog integration={getIntegrationName(editingKey)} isSaving={isSavingKey} onClose={() => setEditingKey(null)} onSave={handleSaveKey} /> : null}
         </section>
       )}
     </main>
@@ -1030,23 +1067,24 @@ function KeyActions({ disabled, onClear, onEdit }: { disabled: boolean; onClear:
 
 function KeyEditDialog({
   integration,
-  savedValue,
+  isSaving,
   onSave,
   onClose
 }: {
   integration: string;
-  savedValue: string;
+  isSaving: boolean;
   onSave: (value: string) => void;
   onClose: () => void;
 }) {
-  const [value, setValue] = useState(savedValue);
+  const [value, setValue] = useState("");
 
   return (
     <div className="key-dialog-backdrop" role="presentation">
       <section aria-label={`API key: ${integration}`} className="key-dialog" role="dialog" aria-modal="true">
         <h2>{integration}: API key</h2>
-        <input autoFocus onChange={(event) => setValue(event.target.value)} type="text" value={value} />
-        <div className="key-actions"><button onClick={() => onSave(value)} type="button">Сохранить</button><button onClick={onClose} type="button">Отмена</button></div>
+        <p>Введите новый ключ. Сохранённое значение не загружается в браузер.</p>
+        <input autoComplete="new-password" autoFocus onChange={(event) => setValue(event.target.value)} type="password" value={value} />
+        <div className="key-actions"><button disabled={isSaving || !value.trim()} onClick={() => onSave(value)} type="button">Сохранить</button><button disabled={isSaving} onClick={onClose} type="button">Отмена</button></div>
       </section>
     </div>
   );

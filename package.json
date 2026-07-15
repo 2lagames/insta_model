@@ -1,16 +1,18 @@
 {
   "name": "instagram-import-studio",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": false,
   "license": "MIT",
   "type": "module",
   "scripts": {
     "start": "npm run dev",
-    "dev": "concurrently -k \"npm:dev:web\" \"npm:dev:api\"",
+    "dev": "npm run setup:git-hooks && concurrently -k \"npm:dev:web\" \"npm:dev:api\"",
     "dev:web": "vite --open",
     "dev:api": "node --import tsx server/index.ts",
     "build": "tsc -b && vite build",
-    "check": "npm test && npm run build",
+    "check": "npm run check:secrets && npm test && npm run build",
+    "check:secrets": "node --import tsx scripts/check-secrets.ts",
+    "setup:git-hooks": "node scripts/install-git-hooks.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

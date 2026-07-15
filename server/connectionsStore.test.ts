@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -45,6 +45,16 @@ describe("ConnectionsStore", () => {
 
     const raw = await readFile(join(tempDir, "connections.local.json"), "utf8");
     expect(JSON.parse(raw)).toEqual({ scrapeCreatorsApiKey: "fake_scrapecreators_key_1234567890" });
+  });
+
+  it.runIf(process.platform !== "win32")("creates and repairs the private file with owner-only permissions", async () => {
+    const filePath = join(tempDir, "connections.local.json");
+    await writeFile(filePath, JSON.stringify({ scrapeCreatorsApiKey: "private-key" }), { mode: 0o644 });
+    const store = new ConnectionsStore(tempDir);
+
+    await store.readPrivate();
+
+    expect((await stat(filePath)).mode & 0o777).toBe(0o600);
   });
 
   it("stores RunningHub credentials and node configuration without workflow JSON", async () => {
@@ -127,24 +137,13 @@ describe("ConnectionsStore", () => {
     });
   });
 
-  it("reads only the selected API key for a key editor", async () => {
-    const store = new ConnectionsStore(tempDir);
-    await store.save({
-      scrapeCreatorsApiKey: "scrape-key",
-      ollamaCloudApiKey: "cloud-key",
-      runningHubApiKey: "runninghub-key"
-    });
-
-    await expect(store.readKey("ollamaCloudApiKey")).resolves.toBe("cloud-key");
-  });
-
-  it("clears a selected API key when its key editor saves a blank value", async () => {
+  it("rejects a blank key replacement without clearing the saved key", async () => {
     const store = new ConnectionsStore(tempDir);
     await store.save({ ollamaCloudApiKey: "cloud-key", ollamaProvider: "cloud" });
 
-    await store.saveKey("ollamaCloudApiKey", "   ");
+    await expect(store.saveKey("ollamaCloudApiKey", "   ")).rejects.toThrow("API key cannot be blank");
 
-    await expect(store.readPrivate()).resolves.toEqual({ ollamaProvider: "cloud" });
+    await expect(store.readPrivate()).resolves.toEqual({ ollamaCloudApiKey: "cloud-key", ollamaProvider: "cloud" });
   });
 
   it("keeps saved provider settings when an older caller saves only its own connection fields", async () => {

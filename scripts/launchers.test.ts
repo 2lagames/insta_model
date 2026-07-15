@@ -47,6 +47,19 @@ describe("cross-platform launchers", () => {
     expect(macosInfo.mode & 0o111).not.toBe(0);
   });
 
+  it("installs the repository secret-check hook before local development", async () => {
+    const [packageJson, hook] = await Promise.all([
+      readFile(join(projectRoot, "package.json"), "utf8"),
+      readFile(join(projectRoot, ".githooks", "pre-commit"), "utf8")
+    ]);
+    const scripts = JSON.parse(packageJson).scripts as Record<string, string>;
+
+    expect(scripts.dev).toContain("npm run setup:git-hooks");
+    expect(scripts["setup:git-hooks"]).toContain("install-git-hooks.mjs");
+    expect(scripts["check:secrets"]).toContain("check-secrets.ts");
+    expect(hook).toContain("npm run check:secrets");
+  });
+
   it("updates safely and starts the project on both platforms", async () => {
     const [windows, macos, readme, packageJson, macosInfo] = await Promise.all([
       readFile(join(projectRoot, "update.bat"), "utf8"),
@@ -72,7 +85,7 @@ describe("cross-platform launchers", () => {
     expect(macos).not.toMatch(/\bkill\b|pkill|lsof/i);
     expect(readme).toContain("update.bat");
     expect(readme).toContain("update.command");
-    expect(JSON.parse(packageJson).version).toBe("0.3.0");
+    expect(JSON.parse(packageJson).version).toBe("0.4.0");
     expect(macosInfo.mode & 0o111).not.toBe(0);
   });
 });

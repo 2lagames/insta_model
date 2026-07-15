@@ -72,11 +72,30 @@ describe("image prompt activity", () => {
   it("keeps key editing behind dedicated private connection routes", () => {
     const source = readFileSync("server/index.ts", "utf8");
 
-    expect(source).toContain('app.get("/api/connections/keys/:keyName"');
+    expect(source).not.toContain('app.get("/api/connections/keys/:keyName"');
     expect(source).toContain('app.put("/api/connections/keys/:keyName"');
     expect(source).toContain('app.delete("/api/connections/keys/:keyName"');
     expect(source).toContain("connectionsStore.saveKey");
     expect(source).toContain("connectionsStore.clearKey");
+  });
+
+  it("does not accept API keys through the ordinary settings route", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+    const settingsStart = source.indexOf('app.put("/api/connections"');
+    const settingsEnd = source.indexOf('app.put("/api/connections/keys/:keyName"', settingsStart);
+    const settingsRoute = source.slice(settingsStart, settingsEnd);
+
+    expect(settingsRoute).not.toContain("scrapeCreatorsApiKey");
+    expect(settingsRoute).not.toContain("ollamaCloudApiKey");
+    expect(settingsRoute).not.toContain("runningHubApiKey");
+  });
+
+  it("serves only allowlisted import metadata instead of the private data directory", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+
+    expect(source).not.toContain('app.use("/media", express.static(dataDir))');
+    expect(source).toContain('app.get("/media/imports/:importId/scrapecreators-response.json"');
+    expect(source).toContain("resolveImportMetadataPath");
   });
 
   it("runs RunningHub only with submitted media and edited prompts", () => {
