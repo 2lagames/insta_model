@@ -95,6 +95,8 @@ export type ConnectionSaveInput = {
   ollamaCloudModel?: string;
   ollamaLocalModel?: string;
   ollamaPromptInstruction?: string;
+  generationPrefixOptions?: string;
+  generationPrefixSelection?: string;
   runningHubApiKey?: string;
   runningHubWorkflowId?: string;
   runningHubPromptNodeId?: string;
@@ -118,6 +120,8 @@ export type PublicConnections = {
   ollamaCloudModel?: string;
   ollamaLocalModel?: string;
   ollamaPromptInstruction?: string;
+  generationPrefixOptions?: string;
+  generationPrefixSelection?: string;
   hasRunningHubApiKey: boolean;
   runningHubApiKeyPreview?: string;
   runningHubWorkflowId?: string;

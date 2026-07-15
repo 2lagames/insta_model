@@ -97,6 +97,8 @@ app.put("/api/connections", async (request, response) => {
       ollamaCloudModel: optionalString(request.body?.ollamaCloudModel),
       ollamaLocalModel: optionalString(request.body?.ollamaLocalModel),
       ollamaPromptInstruction: optionalString(request.body?.ollamaPromptInstruction),
+      generationPrefixOptions: optionalString(request.body?.generationPrefixOptions),
+      generationPrefixSelection: optionalString(request.body?.generationPrefixSelection),
       runningHubApiKey: optionalString(request.body?.runningHubApiKey),
       runningHubWorkflowId: optionalString(request.body?.runningHubWorkflowId),
       runningHubPromptNodeId: optionalString(request.body?.runningHubPromptNodeId),

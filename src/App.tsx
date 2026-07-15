@@ -94,6 +94,8 @@ export default function App() {
   const [ollamaCloudModel, setOllamaCloudModel] = useState("");
   const [ollamaLocalModel, setOllamaLocalModel] = useState("");
   const [ollamaPromptInstruction, setOllamaPromptInstruction] = useState("");
+  const [generationPrefixOptions, setGenerationPrefixOptions] = useState("");
+  const [generationPrefixSelection, setGenerationPrefixSelection] = useState("");
   const [cloudModels, setCloudModels] = useState<string[]>([]);
   const [localModels, setLocalModels] = useState<string[]>([]);
   const [isRefreshingCloudModels, setIsRefreshingCloudModels] = useState(false);
@@ -201,6 +203,8 @@ export default function App() {
         setOllamaCloudModel(loadedConnections.ollamaCloudModel ?? "");
         setOllamaLocalModel(loadedConnections.ollamaLocalModel ?? "");
         setOllamaPromptInstruction(loadedConnections.ollamaPromptInstruction ?? "");
+        setGenerationPrefixOptions(loadedConnections.generationPrefixOptions ?? "");
+        setGenerationPrefixSelection(loadedConnections.generationPrefixSelection ?? "");
         if (loadedConnections.hasOllamaCloudApiKey) {
           void refreshOllamaModels("cloud", true);
         }
@@ -342,11 +346,14 @@ export default function App() {
         ollamaProvider,
         ollamaCloudModel,
         ollamaLocalModel,
-        ollamaPromptInstruction
+        ollamaPromptInstruction,
+        generationPrefixOptions,
+        generationPrefixSelection
       });
       setConnections(savedConnections);
       const generated = await generateImagePrompts(selectedPromptMedia);
-      setPromptDocuments((current) => mergePromptDocuments(current, generated.prompts));
+      const prefix = parseGenerationPrefixes(generationPrefixOptions).find((item) => item.name === generationPrefixSelection)?.text;
+      setPromptDocuments((current) => mergePromptDocuments(current, generated.prompts.map((item) => ({ ...item, prompt: prefix ? `${prefix}, ${item.prompt}` : item.prompt }))));
       setCurrentSession(generated.session);
       setSessionMediaItemIds(generated.session.itemIds);
       setIsMediaSessionReset(false);
@@ -577,6 +584,13 @@ export default function App() {
             <section className="preview-panel">
               <div className="panel-label">Preview</div>
               <Preview
+                generationPrefixOptions={generationPrefixOptions}
+                generationPrefixSelection={generationPrefixSelection}
+                onChangePrefix={setGenerationPrefixSelection}
+                onEditPrefixes={() => {
+                  const value = window.prompt("Название;Текст — одна строка на вариант", generationPrefixOptions);
+                  if (value !== null) setGenerationPrefixOptions(value);
+                }}
                 isGeneratingPrompt={isGeneratingPrompt}
                 isGeneratingImages={isGeneratingImages}
                 onGenerateImages={handleGenerateImages}
@@ -713,6 +727,10 @@ export default function App() {
 }
 
 function Preview({
+  generationPrefixOptions,
+  generationPrefixSelection,
+  onChangePrefix,
+  onEditPrefixes,
   isGeneratingPrompt,
   isGeneratingImages,
   onGenerateImages,
@@ -726,6 +744,10 @@ function Preview({
   materials,
   setPromptDocuments
 }: {
+  generationPrefixOptions: string;
+  generationPrefixSelection: string;
+  onChangePrefix: (value: string) => void;
+  onEditPrefixes: () => void;
   isGeneratingPrompt: boolean;
   isGeneratingImages: boolean;
   onGenerateImages: () => void;
@@ -788,6 +810,10 @@ function Preview({
             </dl>
         </aside>
         <GenerationWorkspace
+          generationPrefixOptions={generationPrefixOptions}
+          generationPrefixSelection={generationPrefixSelection}
+          onChangePrefix={onChangePrefix}
+          onEditPrefixes={onEditPrefixes}
           hasPromptsForEverySelected={selectedForGeneration.every((mediaId) => promptDocuments.some((document) => document.mediaId === mediaId))}
           isGeneratingImages={isGeneratingImages}
           isGeneratingPrompt={isGeneratingPrompt}
@@ -808,7 +834,19 @@ function Preview({
   );
 }
 
+function parseGenerationPrefixes(value: string): Array<{ name: string; text: string }> {
+  return value.split("\n").flatMap((line) => {
+    const separator = line.indexOf(";");
+    if (separator < 1 || !line.slice(separator + 1).trim()) return [];
+    return [{ name: line.slice(0, separator).trim(), text: line.slice(separator + 1).trim() }];
+  });
+}
+
 function GenerationWorkspace({
+  generationPrefixOptions,
+  generationPrefixSelection,
+  onChangePrefix,
+  onEditPrefixes,
   isGeneratingImages,
   isGeneratingPrompt,
   onGenerateImages,
@@ -816,6 +854,10 @@ function GenerationWorkspace({
   hasPromptsForEverySelected,
   selectedForGenerationCount
 }: {
+  generationPrefixOptions: string;
+  generationPrefixSelection: string;
+  onChangePrefix: (value: string) => void;
+  onEditPrefixes: () => void;
   isGeneratingImages: boolean;
   isGeneratingPrompt: boolean;
   onGenerateImages: () => void;
@@ -828,6 +870,7 @@ function GenerationWorkspace({
   return (
     <aside className="generation-panel">
       <div className="panel-label">Generation workspace</div>
+      <div className="generation-prefix-control"><select onChange={(event) => onChangePrefix(event.target.value)} value={generationPrefixSelection}><option value="">Не выбрано</option>{parseGenerationPrefixes(generationPrefixOptions).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select><button aria-label="Редактировать варианты промта" onClick={onEditPrefixes} type="button">✎</button></div>
       <button
         disabled={isBusy || selectedForGenerationCount === 0}
         onClick={onGenerateImagePrompts}

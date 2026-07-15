@@ -9,6 +9,8 @@ export type PrivateConnections = {
   ollamaCloudModel?: string;
   ollamaLocalModel?: string;
   ollamaPromptInstruction?: string;
+  generationPrefixOptions?: string;
+  generationPrefixSelection?: string;
   runningHubApiKey?: string;
   runningHubWorkflowId?: string;
   runningHubPromptNodeId?: string;
@@ -28,6 +30,8 @@ export type PublicConnections = {
   ollamaCloudModel?: string;
   ollamaLocalModel?: string;
   ollamaPromptInstruction?: string;
+  generationPrefixOptions?: string;
+  generationPrefixSelection?: string;
   hasRunningHubApiKey: boolean;
   runningHubApiKeyPreview?: string;
   runningHubWorkflowId?: string;
@@ -71,6 +75,8 @@ export class ConnectionsStore {
       ...(connections.ollamaCloudModel ? { ollamaCloudModel: connections.ollamaCloudModel } : {}),
       ...(connections.ollamaLocalModel ? { ollamaLocalModel: connections.ollamaLocalModel } : {}),
       ollamaPromptInstruction: connections.ollamaPromptInstruction ?? defaultPromptInstruction,
+      ...(connections.generationPrefixOptions !== undefined ? { generationPrefixOptions: connections.generationPrefixOptions } : {}),
+      ...(connections.generationPrefixSelection ? { generationPrefixSelection: connections.generationPrefixSelection } : {}),
       hasRunningHubApiKey: Boolean(runningHubApiKey),
       ...(runningHubApiKey ? { runningHubApiKeyPreview: maskSecret(runningHubApiKey) } : {}),
       ...(connections.runningHubWorkflowId ? { runningHubWorkflowId: connections.runningHubWorkflowId } : {}),
@@ -117,6 +123,8 @@ export class ConnectionsStore {
     const ollamaPromptInstruction = next.ollamaPromptInstruction === undefined
       ? current.ollamaPromptInstruction
       : next.ollamaPromptInstruction.trim();
+    const generationPrefixOptions = next.generationPrefixOptions === undefined ? current.generationPrefixOptions : next.generationPrefixOptions;
+    const generationPrefixSelection = normalizeSetting(next.generationPrefixSelection, current.generationPrefixSelection);
     const runningHubImageNodeId = normalizeSetting(next.runningHubImageNodeId, current.runningHubImageNodeId);
     const runningHubImageFieldName = normalizeSetting(next.runningHubImageFieldName, current.runningHubImageFieldName);
 
@@ -127,6 +135,8 @@ export class ConnectionsStore {
       ...(ollamaCloudModel ? { ollamaCloudModel } : {}),
       ...(ollamaLocalModel ? { ollamaLocalModel } : {}),
       ...(ollamaPromptInstruction !== undefined ? { ollamaPromptInstruction } : {}),
+      ...(generationPrefixOptions !== undefined ? { generationPrefixOptions } : {}),
+      ...(generationPrefixSelection ? { generationPrefixSelection } : {}),
       ...(runningHubApiKey ? { runningHubApiKey } : {}),
       ...(runningHubWorkflowId ? { runningHubWorkflowId } : {}),
       ...(runningHubPromptNodeId ? { runningHubPromptNodeId } : {}),
