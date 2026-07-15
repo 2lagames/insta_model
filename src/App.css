@@ -216,7 +216,7 @@ input {
   min-width: 0;
   display: grid;
   grid-template-rows: auto auto;
-  gap: 0;
+  gap: 8px;
 }
 
 .preview-details > .panel-label,
@@ -353,7 +353,9 @@ input {
 .generation-panel {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 10px;
+  gap: 0;
+  grid-template-rows: 42px repeat(5, 42px);
+  align-content: space-between;
   padding: 14px;
 }
 
@@ -383,10 +385,6 @@ input {
 
 .generation-prefix-control select { padding: 0 12px; }
 .generation-prefix-control button { padding: 0; cursor: pointer; font-size: 20px; }
-
-.generation-panel .panel-label {
-  grid-column: 1 / -1;
-}
 
 .generation-panel button:disabled {
   color: #8d857a;

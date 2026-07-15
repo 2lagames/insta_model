@@ -871,7 +871,6 @@ function GenerationWorkspace({
 
   return (
     <div className="generation-column"><div className="panel-label">Generation workspace</div><aside className="generation-panel">
-      <div className="panel-label">Generation workspace</div>
       <div className="generation-prefix-control"><select onChange={(event) => onChangePrefix(event.target.value)} value={generationPrefixSelection}><option value="">Не выбрано</option>{parseGenerationPrefixes(generationPrefixOptions).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select><button aria-label="Редактировать варианты промта" onClick={onEditPrefixes} type="button">✎</button></div>
       <button
         disabled={isBusy || selectedForGenerationCount === 0}
