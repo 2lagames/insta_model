@@ -106,6 +106,7 @@ export default function App() {
   const [promptDocuments, setPromptDocuments] = useState<PromptDocument[]>([]);
   const promptAutosaveRevisionRef = useRef(0);
   const isPromptAutosaveReadyRef = useRef(false);
+  const localImageInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedItemId) ?? (isMediaSessionReset ? undefined : items[0]),
@@ -330,26 +331,43 @@ export default function App() {
     }
   }
 
-  async function handleLocalImageUpload(file: File | undefined) {
-    if (!file) return;
+  async function handleLocalImageUpload(files: FileList | null) {
+    if (!files?.length) return;
+
     promptAutosaveRevisionRef.current += 1;
     setIsImporting(true);
     try {
-      const imported = await uploadLocalImage(file);
-      const importedMedia = createMediaMaterials(imported.item);
+      const uploaded = [] as Array<Awaited<ReturnType<typeof uploadLocalImage>>>;
+      for (const [index, file] of Array.from(files).entries()) {
+        uploaded.push(await uploadLocalImage(file, { appendToSession: index > 0 }));
+      }
+
+      const firstImported = uploaded[0];
+      const finalImported = uploaded[uploaded.length - 1];
+      const firstImportedMedia = createMediaMaterials(firstImported.item);
       isPromptAutosaveReadyRef.current = true;
-      setCurrentSession(imported.session);
-      setItems((current) => [imported.item, ...current.filter((item) => item.id !== imported.item.id)]);
-      setSelectedItemId(imported.item.id);
-      setSessionMediaItemIds(imported.session.itemIds);
+      setCurrentSession(finalImported.session);
+      setItems((current) => [
+        ...uploaded.map((item) => item.item),
+        ...current.filter((item) => !uploaded.some((uploadedItem) => uploadedItem.item.id === item.id))
+      ]);
+      setSelectedItemId(firstImported.item.id);
+      setSessionMediaItemIds(finalImported.session.itemIds);
       setIsMediaSessionReset(false);
-      setSelectedMediaId(importedMedia[0]?.id ?? null);
-      setSelectedForGeneration(importedMedia[0]?.id ? [importedMedia[0].id] : []);
+      setSelectedMediaId(firstImportedMedia[0]?.id ?? null);
+      setSelectedForGeneration([]);
       setPromptDocuments([]);
       setUrl("");
       setUrlNotice("Локальное изображение — ссылка Instagram отсутствует");
       recordStatus({ tone: "ready", message: "Local image uploaded." });
-    } catch (error) { recordStatus({ tone: "error", message: toErrorMessage(error) }); } finally { setIsImporting(false); }
+    } catch (error) {
+      recordStatus({ tone: "error", message: toErrorMessage(error) });
+    } finally {
+      if (localImageInputRef.current) {
+        localImageInputRef.current.value = "";
+      }
+      setIsImporting(false);
+    }
   }
 
   async function handleOpenFolder() {
@@ -380,9 +398,46 @@ export default function App() {
     }
   }
 
+  async function createSelectedPrompts(): Promise<Array<{ mediaId: string; label: string; prompt: string }>> {
+    const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
+    const documentsByMediaId = new Map(promptDocuments.map((document) => [document.mediaId, document]));
+    const missingPromptMedia = selectedPromptMedia.filter((media) => !documentsByMediaId.has(media.id));
+    const savedConnections = await saveConnections({
+      ollamaProvider,
+      ollamaCloudModel,
+      ollamaLocalModel,
+      ollamaPromptInstruction,
+      generationPrefixOptions,
+      generationPrefixSelection
+    });
+    setConnections(savedConnections);
+
+    let generatedPrompts: Array<{ mediaId: string; label: string; prompt: string }> = [];
+    if (missingPromptMedia.length > 0) {
+      const generated = await generateImagePrompts(missingPromptMedia);
+      const prefix = parseGenerationPrefixes(generationPrefixOptions).find((item) => item.name === generationPrefixSelection)?.text;
+      generatedPrompts = generated.prompts.map((item) => ({
+        ...item,
+        prompt: prefix ? `${prefix}, ${item.prompt}` : item.prompt
+      }));
+      setPromptDocuments((current) => mergePromptDocuments(current, generatedPrompts));
+      setCurrentSession(generated.session);
+      setSessionMediaItemIds(generated.session.itemIds);
+      setIsMediaSessionReset(false);
+    }
+
+    const promptByMediaId = new Map<string, string>([
+      ...promptDocuments.map((document) => [document.mediaId, getCurrentPrompt(document)] as const),
+      ...generatedPrompts.map((prompt) => [prompt.mediaId, prompt.prompt] as const)
+    ]);
+    return selectedPromptMedia.flatMap((media) => {
+      const prompt = promptByMediaId.get(media.id);
+      return prompt === undefined ? [] : [{ mediaId: media.id, label: media.label, prompt }];
+    });
+  }
+
   async function handleGenerateImagePrompts() {
     const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
-
     if (selectedPromptMedia.length === 0) {
       recordStatus({ tone: "error", message: "Select one or more Media items before prompt generation." });
       return;
@@ -391,21 +446,10 @@ export default function App() {
     setIsGeneratingPrompt(true);
     recordStatus({ tone: "running", message: "Generating prompts with the selected Ollama model." });
     try {
-      const savedConnections = await saveConnections({
-        ollamaProvider,
-        ollamaCloudModel,
-        ollamaLocalModel,
-        ollamaPromptInstruction,
-        generationPrefixOptions,
-        generationPrefixSelection
-      });
-      setConnections(savedConnections);
-      const generated = await generateImagePrompts(selectedPromptMedia);
-      const prefix = parseGenerationPrefixes(generationPrefixOptions).find((item) => item.name === generationPrefixSelection)?.text;
-      setPromptDocuments((current) => mergePromptDocuments(current, generated.prompts.map((item) => ({ ...item, prompt: prefix ? `${prefix}, ${item.prompt}` : item.prompt }))));
-      setCurrentSession(generated.session);
-      setSessionMediaItemIds(generated.session.itemIds);
-      setIsMediaSessionReset(false);
+      const selectedPrompts = await createSelectedPrompts();
+      const savedSession = await saveSessionPrompts(Object.fromEntries(selectedPrompts.map((prompt) => [prompt.mediaId, prompt.prompt])));
+      setCurrentSession(savedSession);
+      setSessionMediaItemIds(savedSession.itemIds);
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
     } finally {
@@ -451,26 +495,21 @@ export default function App() {
 
   async function handleGenerateImages() {
     const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
-    const promptByMediaId = new Map(promptDocuments.map((document) => [document.mediaId, document]));
-    const imageJobs = selectedPromptMedia.map((media) => {
-      const document = promptByMediaId.get(media.id);
-      return document ? { media, prompt: getCurrentPrompt(document) } : undefined;
-    }).filter((job): job is { media: PromptMediaInput; prompt: string } => Boolean(job));
-
     if (selectedPromptMedia.length === 0) {
       recordStatus({ tone: "error", message: "Select one or more Media items before image generation." });
-      return;
-    }
-
-    if (imageJobs.length !== selectedPromptMedia.length) {
-      recordStatus({ tone: "error", message: "Generate a prompt for every selected Media item before image generation." });
       return;
     }
 
     setIsGeneratingImages(true);
     recordStatus({ tone: "running", message: "Sending the current edited prompts and source images to RunningHub." });
     try {
-      const savedSession = await saveSessionPrompts(Object.fromEntries(imageJobs.map((job) => [job.media.id, job.prompt])));
+      const selectedPrompts = await createSelectedPrompts();
+      const promptsByMediaId = new Map(selectedPrompts.map((prompt) => [prompt.mediaId, prompt.prompt]));
+      const imageJobs = selectedPromptMedia.flatMap((media) => {
+        const prompt = promptsByMediaId.get(media.id);
+        return prompt === undefined ? [] : [{ media, prompt }];
+      });
+      const savedSession = await saveSessionPrompts(Object.fromEntries(selectedPrompts.map((prompt) => [prompt.mediaId, prompt.prompt])));
       setCurrentSession(savedSession);
       setSessionMediaItemIds(savedSession.itemIds);
       const generated = await generateImages(imageJobs);
@@ -664,7 +703,7 @@ export default function App() {
             </button>
             <label className="secondary-button upload-image-button">
               Загрузить изображение
-              <input accept="image/*" disabled={isImporting} onChange={(event) => void handleLocalImageUpload(event.target.files?.[0])} type="file" />
+              <input accept="image/*" disabled={isImporting} multiple onChange={(event) => void handleLocalImageUpload(event.target.files)} ref={localImageInputRef} type="file" />
             </label>
             <button className="secondary-button" onClick={handleOpenFolder} type="button">Open Folder</button>
           </section>
@@ -691,6 +730,7 @@ export default function App() {
                 materials={mediaMaterials}
                 selected={selectedMedia}
                 selectedForGenerationCount={selectedForGeneration.length}
+                setSelectedForGeneration={setSelectedForGeneration}
                 setPromptDocuments={setPromptDocuments}
               />
             </section>
@@ -831,6 +871,7 @@ function Preview({
   selectedForGenerationCount,
   selected,
   materials,
+  setSelectedForGeneration,
   setPromptDocuments
 }: {
   generationPrefixOptions: string;
@@ -849,6 +890,7 @@ function Preview({
   selectedForGenerationCount: number;
   selected?: MediaMaterial;
   materials: MediaMaterial[];
+  setSelectedForGeneration: React.Dispatch<React.SetStateAction<string[]>>;
   setPromptDocuments: React.Dispatch<React.SetStateAction<PromptDocument[]>>;
 }) {
   const importItem = selected?.importItem;
@@ -868,7 +910,7 @@ function Preview({
           ) : null}
         </div>
         </div>
-        <MediaSelector materials={materials} onSelect={onSelectMaterial} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
+        <MediaSelector materials={materials} onSelect={onSelectMaterial} onSelectAll={() => setSelectedForGeneration(materials.map((material) => material.id))} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
         <aside className="preview-details"><div className="panel-label">Info</div>
           <div className="info-content">
             <section className="caption-panel">
@@ -904,7 +946,6 @@ function Preview({
           generationPrefixSelection={generationPrefixSelection}
           onChangePrefix={onChangePrefix}
           onEditPrefixes={onEditPrefixes}
-          hasPromptsForEverySelected={selectedForGeneration.every((mediaId) => promptDocuments.some((document) => document.mediaId === mediaId))}
           isGeneratingImages={isGeneratingImages}
           isGeneratingPrompt={isGeneratingPrompt}
           onGenerateImages={onGenerateImages}
@@ -942,7 +983,6 @@ function GenerationWorkspace({
   isGeneratingPrompt,
   onGenerateImages,
   onGenerateImagePrompts,
-  hasPromptsForEverySelected,
   selectedForGenerationCount
 }: {
   generationPrefixOptions: string;
@@ -953,7 +993,6 @@ function GenerationWorkspace({
   isGeneratingPrompt: boolean;
   onGenerateImages: () => void;
   onGenerateImagePrompts: () => void;
-  hasPromptsForEverySelected: boolean;
   selectedForGenerationCount: number;
 }) {
   const isBusy = isGeneratingPrompt || isGeneratingImages;
@@ -969,7 +1008,7 @@ function GenerationWorkspace({
         {isGeneratingPrompt ? "Generating" : `Generate prompt (${selectedForGenerationCount})`}
       </button>
       <button
-        disabled={isBusy || selectedForGenerationCount === 0 || !hasPromptsForEverySelected}
+        disabled={isBusy}
         onClick={onGenerateImages}
         type="button"
       >
@@ -985,19 +1024,21 @@ function GenerationWorkspace({
 function MediaSelector({
   materials,
   onSelect,
+  onSelectAll,
   onToggle,
   selected,
   selectedForGeneration
 }: {
   materials: MediaMaterial[];
   onSelect: (material: MediaMaterial) => void;
+  onSelectAll: () => void;
   onToggle: (materialId: string) => void;
   selected?: MediaMaterial;
   selectedForGeneration: string[];
 }) {
   return (
     <aside className="media-selector">
-      <div className="panel-label">Media</div>
+      <div className="panel-label">Media <button onClick={onSelectAll} type="button">Выбрать все</button></div>
       {materials.map((material) => (
         <div className={["gallery-item", material.id === selected?.id ? "selected" : "", selectedForGeneration.includes(material.id) ? "queued" : ""].filter(Boolean).join(" ")} key={material.id}>
           <button className="gallery-preview" onClick={() => onSelect(material)} type="button">

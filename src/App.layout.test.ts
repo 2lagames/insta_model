@@ -120,4 +120,15 @@ describe("studio preview layout", () => {
     expect(appSource.match(/promptAutosaveRevisionRef\.current \+= 1/g)?.length).toBeGreaterThanOrEqual(3);
     expect(appSource.match(/isPromptAutosaveReadyRef\.current = true/g)?.length).toBeGreaterThanOrEqual(4);
   });
+
+  it("supports batch local uploads and lets image generation create missing prompts", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+
+    expect(appSource).toContain("multiple");
+    expect(appSource).toContain("event.target.files");
+    expect(appSource).toContain("appendToSession: index > 0");
+    expect(appSource).toContain("onSelectAll={() => setSelectedForGeneration(materials.map((material) => material.id))}");
+    expect(appSource).toContain("setSelectedForGeneration([])");
+    expect(appSource).toContain("await createSelectedPrompts()");
+  });
 });
