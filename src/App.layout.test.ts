@@ -131,4 +131,28 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("setSelectedForGeneration([])");
     expect(appSource).toContain("await createSelectedPrompts()");
   });
+
+  it("keeps every successful batch upload reflected locally before a later upload can fail", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const uploadStart = appSource.indexOf("async function handleLocalImageUpload");
+    const uploadHandler = appSource.slice(uploadStart, appSource.indexOf("async function handleOpenFolder", uploadStart));
+
+    expect(uploadHandler).toContain("const imported = await uploadLocalImage");
+    expect(uploadHandler).toContain("setCurrentSession(imported.session)");
+    expect(uploadHandler).toContain("setSessionMediaItemIds(imported.session.itemIds)");
+    expect(uploadHandler).toContain("setSelectedForGeneration([])");
+    expect(uploadHandler.indexOf("setCurrentSession(imported.session)")).toBeLessThan(uploadHandler.indexOf("} catch"));
+  });
+
+  it("locks prompt editors while prompt or image generation is running", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const promptEditorsStart = appSource.indexOf("function PromptEditors({");
+    const promptEditors = appSource.slice(promptEditorsStart);
+
+    expect(appSource).toContain("isBusy={isGeneratingPrompt || isGeneratingImages}");
+    expect(promptEditors).toContain("isBusy: boolean;");
+    expect(promptEditors).toContain("disabled={isBusy || document.historyIndex === 0}");
+    expect(promptEditors).toContain("disabled={isBusy || document.historyIndex === document.history.length - 1}");
+    expect(promptEditors).toContain("disabled={isBusy}");
+  });
 });

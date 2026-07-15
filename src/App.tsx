@@ -339,26 +339,27 @@ export default function App() {
     try {
       const uploaded = [] as Array<Awaited<ReturnType<typeof uploadLocalImage>>>;
       for (const [index, file] of Array.from(files).entries()) {
-        uploaded.push(await uploadLocalImage(file, { appendToSession: index > 0 }));
+        const imported = await uploadLocalImage(file, { appendToSession: index > 0 });
+        uploaded.push(imported);
+
+        const firstImported = uploaded[0];
+        const firstImportedMedia = createMediaMaterials(firstImported.item);
+        isPromptAutosaveReadyRef.current = true;
+        setCurrentSession(imported.session);
+        setItems((current) => [
+          ...uploaded.map((item) => item.item),
+          ...current.filter((item) => !uploaded.some((uploadedItem) => uploadedItem.item.id === item.id))
+        ]);
+        setSelectedItemId(firstImported.item.id);
+        setSessionMediaItemIds(imported.session.itemIds);
+        setIsMediaSessionReset(false);
+        setSelectedMediaId(firstImportedMedia[0]?.id ?? null);
+        setSelectedForGeneration([]);
+        setPromptDocuments([]);
+        setUrl("");
+        setUrlNotice("Локальное изображение — ссылка Instagram отсутствует");
       }
 
-      const firstImported = uploaded[0];
-      const finalImported = uploaded[uploaded.length - 1];
-      const firstImportedMedia = createMediaMaterials(firstImported.item);
-      isPromptAutosaveReadyRef.current = true;
-      setCurrentSession(finalImported.session);
-      setItems((current) => [
-        ...uploaded.map((item) => item.item),
-        ...current.filter((item) => !uploaded.some((uploadedItem) => uploadedItem.item.id === item.id))
-      ]);
-      setSelectedItemId(firstImported.item.id);
-      setSessionMediaItemIds(finalImported.session.itemIds);
-      setIsMediaSessionReset(false);
-      setSelectedMediaId(firstImportedMedia[0]?.id ?? null);
-      setSelectedForGeneration([]);
-      setPromptDocuments([]);
-      setUrl("");
-      setUrlNotice("Локальное изображение — ссылка Instagram отсутствует");
       recordStatus({ tone: "ready", message: "Local image uploaded." });
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
@@ -955,6 +956,7 @@ function Preview({
       </div>
       <PromptEditors
         documents={promptDocuments.filter((document) => selectedForGeneration.includes(document.mediaId))}
+        isBusy={isGeneratingPrompt || isGeneratingImages}
         materials={materials.filter((material) => selectedForGeneration.includes(material.id))}
         onEdit={(mediaId, value) => setPromptDocuments((current) => editPromptDocument(current, mediaId, value))}
         onRedo={(mediaId) => setPromptDocuments((current) => redoPromptDocument(current, mediaId))}
@@ -1057,6 +1059,7 @@ function MediaSelector({
 
 function PromptEditors({
   documents,
+  isBusy,
   materials,
   onEdit,
   onRedo,
@@ -1065,6 +1068,7 @@ function PromptEditors({
   onUndo
 }: {
   documents: PromptDocument[];
+  isBusy: boolean;
   materials: MediaMaterial[];
   onEdit: (mediaId: string, value: string) => void;
   onRedo: (mediaId: string) => void;
@@ -1085,13 +1089,13 @@ function PromptEditors({
           <div className="prompt-editor-header">
             <strong>Промт: {materialById.get(document.mediaId)?.label ?? document.label}</strong>
             <div className="prompt-editor-actions">
-              <button aria-label="Отменить изменение промта" disabled={document.historyIndex === 0} onClick={() => onUndo(document.mediaId)} type="button">↶</button>
-               <button aria-label="Повторить изменение промта" disabled={document.historyIndex === document.history.length - 1} onClick={() => onRedo(document.mediaId)} type="button">↷</button>
-               <button aria-label="Сбросить изменения промта" onClick={() => onReset(document.mediaId)} type="button">↺</button>
-               <button onClick={() => onSave(document.mediaId)} type="button">Сохранить</button>
+              <button aria-label="Отменить изменение промта" disabled={isBusy || document.historyIndex === 0} onClick={() => onUndo(document.mediaId)} type="button">↶</button>
+               <button aria-label="Повторить изменение промта" disabled={isBusy || document.historyIndex === document.history.length - 1} onClick={() => onRedo(document.mediaId)} type="button">↷</button>
+               <button aria-label="Сбросить изменения промта" disabled={isBusy} onClick={() => onReset(document.mediaId)} type="button">↺</button>
+               <button disabled={isBusy} onClick={() => onSave(document.mediaId)} type="button">Сохранить</button>
             </div>
           </div>
-          <textarea rows={20} value={getCurrentPrompt(document)} onChange={(event) => onEdit(document.mediaId, event.target.value)} />
+          <textarea disabled={isBusy} rows={20} value={getCurrentPrompt(document)} onChange={(event) => onEdit(document.mediaId, event.target.value)} />
         </article>
       ))}
     </section>
