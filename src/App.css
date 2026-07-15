@@ -149,7 +149,7 @@ input {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0;
-  margin: 0;
+  margin-bottom: 10px;
 }
 
 .preview-empty,
@@ -184,7 +184,6 @@ input {
 }
 
 .preview-main {
-  --studio-stage-height: clamp(560px, 68vh, 780px);
   min-height: 0;
   display: grid;
   grid-template-columns: auto minmax(110px, 150px) minmax(200px, 0.75fr) minmax(180px, 0.5fr);
@@ -193,19 +192,9 @@ input {
   justify-content: start;
 }
 
-.preview-column,
-.media-selector,
-.preview-details,
-.generation-column {
-  min-width: 0;
-  display: grid;
-  grid-template-rows: auto var(--studio-stage-height);
-  gap: 10px;
-}
-
 .media-stage {
   min-height: 0;
-  height: var(--studio-stage-height);
+  height: clamp(560px, 68vh, 780px);
   aspect-ratio: 9 / 16;
   display: grid;
   place-items: center;
@@ -224,13 +213,14 @@ input {
 }
 
 .preview-details {
-  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 0;
 }
 
 .info-content {
-  min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
 }
 
@@ -238,15 +228,11 @@ input {
   margin: 0;
   display: grid;
   grid-template-columns: 1fr;
-  grid-template-rows: repeat(5, minmax(0, 1fr));
   gap: 8px;
 }
 
 .metadata-grid div {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
   border: 1px solid #ded8ce;
   border-radius: 8px;
   padding: 10px;
@@ -364,15 +350,16 @@ input {
 }
 
 .generation-panel {
-  height: var(--studio-stage-height);
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr;
   gap: 8px;
-  justify-content: space-between;
+  grid-auto-rows: 42px;
+  align-content: start;
   padding: 14px;
 }
 
 .generation-column {
+  min-width: 0;
   min-height: 0;
 }
 
@@ -402,9 +389,11 @@ input {
 }
 
 .media-selector {
-  height: calc(var(--studio-stage-height) + 24px);
-  overflow-y: auto;
-  padding-right: 4px;
+  height: clamp(560px, 68vh, 780px);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 .copy-log-button {

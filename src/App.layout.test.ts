@@ -51,14 +51,15 @@ describe("studio preview layout", () => {
     expect(cssSource).toContain("height: clamp(560px, 68vh, 780px)");
   });
 
-  it("uses one content height and consistent spacing for every studio column", () => {
+  it("aligns column content at the top without stretching the studio panels", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const cssSource = readFileSync("src/App.css", "utf8");
 
     expect(appSource).toContain('className="info-content"');
-    expect(cssSource).toContain("--studio-stage-height: clamp(560px, 68vh, 780px)");
-    expect(cssSource).toContain("grid-template-rows: auto var(--studio-stage-height)");
-    expect(cssSource).toContain("height: var(--studio-stage-height)");
-    expect(cssSource).toContain("justify-content: space-between");
+    expect(cssSource).toContain(".preview-details {\n  min-width: 0;\n  display: grid;\n  grid-template-rows: auto auto;\n  gap: 0;");
+    expect(cssSource).toContain(".info-content {\n  display: grid;\n  gap: 8px;");
+    expect(cssSource).toContain("grid-auto-rows: 42px");
+    expect(cssSource).not.toContain("--studio-stage-height");
+    expect(cssSource).not.toContain("overflow-y: auto");
   });
 });
