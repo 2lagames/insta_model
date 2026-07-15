@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  clearConnectionKey,
   cleanupDuplicateImports,
   generateImagePrompts,
   generateImages,
+  getConnectionKey,
   importInstagramUrl,
+  listOllamaModels,
   listImports,
-  resetMediaSession
+  resetMediaSession,
+  saveConnectionKey
 } from "./api";
 
 describe("generateImages", () => {
@@ -13,9 +17,8 @@ describe("generateImages", () => {
     vi.restoreAllMocks();
   });
 
-  it("posts selected media to the local image generation pipeline", async () => {
+  it("posts each selected media item with its final edited prompt", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
-      prompt: "{\"high_level_description\":\"test\"}",
       item: {
         id: "generated-1",
         sourceUrl: "runninghub://task-1",
@@ -28,14 +31,15 @@ describe("generateImages", () => {
       }
     })));
 
-    await expect(generateImages([{
+    const media = {
       id: "item:asset:first-frame",
       label: "First frame",
       imagePath: "/input/20260625/import/first-frame-001.jpg",
-      sourceKind: "video-first-frame",
+      sourceKind: "video-first-frame" as const,
       caption: "Caption"
-    }])).resolves.toEqual({
-      prompt: "{\"high_level_description\":\"test\"}",
+    };
+
+    await expect(generateImages([{ media, prompt: "edited prompt" }])).resolves.toEqual({
       item: {
         id: "generated-1",
         sourceUrl: "runninghub://task-1",
@@ -59,13 +63,7 @@ describe("generateImages", () => {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        media: [{
-          id: "item:asset:first-frame",
-          label: "First frame",
-          imagePath: "/input/20260625/import/first-frame-001.jpg",
-          sourceKind: "video-first-frame",
-          caption: "Caption"
-        }]
+        jobs: [{ media, prompt: "edited prompt" }]
       })
     });
   });
@@ -74,10 +72,13 @@ describe("generateImages", () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
 
     await expect(generateImages([{
+      prompt: "edited prompt",
+      media: {
       id: "item:asset:image",
       label: "Image",
       imagePath: "/input/20260625/import/image-001.jpg",
       sourceKind: "photo"
+      }
     }])).rejects.toThrow("Local API is not reachable");
   });
 });
@@ -89,7 +90,11 @@ describe("generateImagePrompts", () => {
 
   it("returns the updated media session produced by prompt generation", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
-      prompt: "{\"high_level_description\":\"test\"}",
+      prompts: [{
+        mediaId: "item:asset:image",
+        label: "Image",
+        prompt: "{\"high_level_description\":\"test\"}"
+      }],
       session: {
         itemIds: ["post-1"],
         sceneBibles: [{
@@ -118,7 +123,10 @@ describe("generateImagePrompts", () => {
       imagePath: "/input/20260625/import/image-001.jpg",
       sourceKind: "photo"
     }])).resolves.toMatchObject({
-      prompt: "{\"high_level_description\":\"test\"}",
+      prompts: [{
+        mediaId: "item:asset:image",
+        prompt: "{\"high_level_description\":\"test\"}"
+      }],
       session: {
         itemIds: ["post-1"],
         mediaSceneMap: {
@@ -126,6 +134,34 @@ describe("generateImagePrompts", () => {
         }
       }
     });
+  });
+});
+
+describe("connections API", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("uses dedicated key routes and requests Ollama models for the selected provider", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ key: "cloud-key" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: "gemma3" }] })));
+
+    await expect(getConnectionKey("ollamaCloudApiKey")).resolves.toBe("cloud-key");
+    await expect(saveConnectionKey("ollamaCloudApiKey", "replacement-key")).resolves.toBeUndefined();
+    await expect(clearConnectionKey("ollamaCloudApiKey")).resolves.toBeUndefined();
+    await expect(listOllamaModels("cloud")).resolves.toEqual([{ name: "gemma3" }]);
+
+    expect(fetchSpy).toHaveBeenNthCalledWith(1, "/api/connections/keys/ollamaCloudApiKey");
+    expect(fetchSpy).toHaveBeenNthCalledWith(2, "/api/connections/keys/ollamaCloudApiKey", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "replacement-key" })
+    });
+    expect(fetchSpy).toHaveBeenNthCalledWith(3, "/api/connections/keys/ollamaCloudApiKey", { method: "DELETE" });
+    expect(fetchSpy).toHaveBeenNthCalledWith(4, "/api/ollama/models?provider=cloud");
   });
 });
 

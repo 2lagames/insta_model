@@ -1,6 +1,7 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   buildRunningHubCreatePayload,
@@ -9,13 +10,15 @@ import {
 } from "./runningHub";
 
 describe("buildRunningHubCreatePayload", () => {
-  it("builds a RunningHub advanced workflow request with the prompt node override", () => {
+  it("builds a RunningHub advanced workflow request with image and prompt node overrides", () => {
     const payload = buildRunningHubCreatePayload({
       apiKey: "rh_api_key",
       workflowId: "1904136902449209346",
       promptNodeId: "6",
       promptFieldName: "text",
-      workflowJson: "{\"6\":{\"inputs\":{\"text\":\"old\"}}}",
+      imageNodeId: "39",
+      imageFieldName: "image",
+      uploadedImageFileName: "api/input.png",
       prompt: "{\"high_level_description\":\"A model in the city\"}"
     });
 
@@ -23,26 +26,139 @@ describe("buildRunningHubCreatePayload", () => {
       apiKey: "rh_api_key",
       workflowId: "1904136902449209346",
       instanceType: "plus",
-      workflow: "{\"6\":{\"inputs\":{\"text\":\"old\"}}}",
-      nodeInfoList: [{
-        nodeId: "6",
-        fieldName: "text",
-        fieldValue: "{\"high_level_description\":\"A model in the city\"}"
-      }]
+      nodeInfoList: [
+        {
+          nodeId: "39",
+          fieldName: "image",
+          fieldValue: "api/input.png"
+        },
+        {
+          nodeId: "6",
+          fieldName: "text",
+          fieldValue: "{\"high_level_description\":\"A model in the city\"}"
+        }
+      ]
     });
   });
 });
 
 describe("runRunningHubImageGeneration", () => {
-  const workflowWithSaveImage = "{\"9\":{\"class_type\":\"SaveImage\",\"inputs\":{\"images\":[\"8\",0]}}}";
+  const sourceImagePath = fileURLToPath(import.meta.url);
+
+  it("uploads the source image before creating a task with both node overrides", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "runninghub-"));
+    const outputDir = join(tempDir, "output");
+    const imagePath = join(tempDir, "source.png");
+    const requests: Array<{ pathname: string; init?: RequestInit }> = [];
+
+    await writeFile(imagePath, "source-image");
+    const fetchImpl = (async (url: URL | RequestInfo, init?: RequestInit) => {
+      const requestUrl = new URL(String(url));
+      if (requestUrl.hostname === "runninghub.example.com") {
+        requests.push({ pathname: requestUrl.pathname, init });
+      }
+      if (requestUrl.pathname.endsWith("/task/openapi/upload")) {
+        return new Response(JSON.stringify({ code: 0, data: { fileName: "api/source.png" } }), { status: 200 });
+      }
+      if (requestUrl.pathname.endsWith("/task/openapi/create")) {
+        return new Response(JSON.stringify({ code: 0, data: { taskId: "task-1" } }), { status: 200 });
+      }
+      if (requestUrl.pathname.endsWith("/task/openapi/status")) {
+        return new Response(JSON.stringify({ code: 0, data: { status: "SUCCESS" } }), { status: 200 });
+      }
+      if (requestUrl.pathname.endsWith("/task/openapi/outputs")) {
+        return new Response(JSON.stringify({ code: 0, data: [{ fileUrl: "https://cdn.example.com/task-1/image.png" }] }), { status: 200 });
+      }
+      if (requestUrl.hostname === "cdn.example.com") {
+        return new Response(Buffer.from("png"), { status: 200, headers: { "Content-Type": "image/png" } });
+      }
+      throw new Error(`Unexpected request: ${requestUrl.toString()}`);
+    }) as typeof fetch;
+
+    try {
+      await runRunningHubImageGeneration({
+        outputDir,
+        now: new Date("2026-06-25T10:30:00.000Z"),
+        baseUrl: "https://runninghub.example.com",
+        fetchImpl,
+        config: {
+          apiKey: "rh_api_key",
+          workflowId: "workflow",
+          promptNodeId: "52",
+          promptFieldName: "prompt",
+          imageNodeId: "39",
+          imageFieldName: "image"
+        },
+        jobs: [{ mediaId: "media-1", label: "Source image", imagePath, prompt: "new prompt" }]
+      });
+
+      expect(requests.map((request) => request.pathname)).toEqual([
+        "/task/openapi/upload",
+        "/task/openapi/create",
+        "/task/openapi/status",
+        "/task/openapi/outputs"
+      ]);
+      expect(requests[0].init?.body).toBeInstanceOf(FormData);
+      const uploadForm = requests[0].init?.body as FormData;
+      expect(uploadForm.get("apiKey")).toBe("rh_api_key");
+      expect(uploadForm.get("file")).toBeInstanceOf(File);
+      expect(JSON.parse(String(requests[1].init?.body))).toMatchObject({
+        nodeInfoList: [
+          { nodeId: "39", fieldName: "image", fieldValue: "api/source.png" },
+          { nodeId: "52", fieldName: "prompt", fieldValue: "new prompt" }
+        ]
+      });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an upload response missing data.fileName before creating a task", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "runninghub-"));
+    const imagePath = join(tempDir, "source.png");
+    let createCalls = 0;
+    await writeFile(imagePath, "source-image");
+    const fetchImpl = (async (url: URL | RequestInfo) => {
+      const requestUrl = new URL(String(url));
+      if (requestUrl.pathname.endsWith("/task/openapi/upload")) {
+        return new Response(JSON.stringify({ code: 0, data: {} }), { status: 200 });
+      }
+      if (requestUrl.pathname.endsWith("/task/openapi/create")) {
+        createCalls += 1;
+      }
+      throw new Error(`Unexpected request: ${requestUrl.toString()}`);
+    }) as typeof fetch;
+
+    try {
+      await expect(runRunningHubImageGeneration({
+        outputDir: join(tempDir, "output"),
+        now: new Date("2026-06-25T10:30:00.000Z"),
+        fetchImpl,
+        baseUrl: "https://runninghub.example.com",
+        config: {
+          apiKey: "rh_api_key",
+          workflowId: "workflow",
+          promptNodeId: "6",
+          promptFieldName: "text",
+          imageNodeId: "39",
+          imageFieldName: "image"
+        },
+        jobs: [{ mediaId: "media-1", label: "Image", imagePath, prompt: "new prompt" }]
+      })).rejects.toThrow("data.fileName");
+
+      expect(createCalls).toBe(0);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
 
   it("creates one task per selected prompt and saves every image returned by RunningHub", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "runninghub-"));
     const outputDir = join(tempDir, "output");
     const jobs: RunningHubPromptJob[] = [
-      { mediaId: "media-1", label: "First frame", prompt: "{\"a\":1}" },
-      { mediaId: "media-2", label: "Image", prompt: "{\"a\":2}" },
-      { mediaId: "media-3", label: "Image", prompt: "{\"a\":3}" }
+      { mediaId: "media-1", label: "First frame", imagePath: sourceImagePath, prompt: "{\"a\":1}" },
+      { mediaId: "media-2", label: "Image", imagePath: sourceImagePath, prompt: "{\"a\":2}" },
+      { mediaId: "media-3", label: "Image", imagePath: sourceImagePath, prompt: "{\"a\":3}" }
     ];
     const taskIds = ["task-1", "task-2", "task-3"];
     const outputCalls: string[] = [];
@@ -50,12 +166,17 @@ describe("runRunningHubImageGeneration", () => {
     await mkdir(outputDir, { recursive: true });
     const fetchImpl = (async (url: URL | RequestInfo, init?: RequestInit) => {
       const requestUrl = new URL(String(url));
+      if (requestUrl.pathname.endsWith("/task/openapi/upload")) {
+        return new Response(JSON.stringify({ code: 0, data: { fileName: "api/source.png" } }), { status: 200 });
+      }
       if (requestUrl.pathname.endsWith("/task/openapi/create")) {
         const body = JSON.parse(String(init?.body));
         const taskId = taskIds.shift();
         expect(body.instanceType).toBe("plus");
-        expect(body.nodeInfoList).toHaveLength(1);
-        expect(body.nodeInfoList[0].fieldName).toBe("text");
+        expect(body.nodeInfoList).toEqual([
+          { nodeId: "39", fieldName: "image", fieldValue: "api/source.png" },
+          expect.objectContaining({ nodeId: "6", fieldName: "text" })
+        ]);
         return new Response(JSON.stringify({ code: 0, data: { taskId } }), { status: 200 });
       }
       if (requestUrl.pathname.endsWith("/task/openapi/status")) {
@@ -93,7 +214,8 @@ describe("runRunningHubImageGeneration", () => {
           workflowId: "1904136902449209346",
           promptNodeId: "6",
           promptFieldName: "text",
-          workflowJson: workflowWithSaveImage
+          imageNodeId: "39",
+          imageFieldName: "image"
         },
         jobs,
         onStatus: () => undefined
@@ -135,6 +257,9 @@ describe("runRunningHubImageGeneration", () => {
     await mkdir(outputDir, { recursive: true });
     const fetchImpl = (async (url: URL | RequestInfo) => {
       const requestUrl = new URL(String(url));
+      if (requestUrl.pathname.endsWith("/task/openapi/upload")) {
+        return new Response(JSON.stringify({ code: 0, data: { fileName: "api/source.png" } }), { status: 200 });
+      }
       if (requestUrl.pathname.endsWith("/task/openapi/create")) {
         return new Response(JSON.stringify({ code: 0, data: { taskId: "task-1" } }), { status: 200 });
       }
@@ -174,9 +299,10 @@ describe("runRunningHubImageGeneration", () => {
           workflowId: "1904136902449209346",
           promptNodeId: "6",
           promptFieldName: "text",
-          workflowJson: workflowWithSaveImage
+          imageNodeId: "39",
+          imageFieldName: "image"
         },
-        jobs: [{ mediaId: "media-1", label: "Image", prompt: "{\"a\":1}" }],
+        jobs: [{ mediaId: "media-1", label: "Image", imagePath: sourceImagePath, prompt: "{\"a\":1}" }],
         onStatus: () => undefined
       });
 
@@ -193,6 +319,9 @@ describe("runRunningHubImageGeneration", () => {
 
     const fetchImpl = (async (url: URL | RequestInfo) => {
       const requestUrl = new URL(String(url));
+      if (requestUrl.pathname.endsWith("/task/openapi/upload")) {
+        return new Response(JSON.stringify({ code: 0, data: { fileName: "api/source.png" } }), { status: 200 });
+      }
       if (requestUrl.pathname.endsWith("/task/openapi/create")) {
         return new Response(JSON.stringify({ code: 0, data: { taskId: "task-1" } }), { status: 200 });
       }
@@ -217,9 +346,10 @@ describe("runRunningHubImageGeneration", () => {
           workflowId: "1904136902449209346",
           promptNodeId: "6",
           promptFieldName: "text",
-          workflowJson: workflowWithSaveImage
+          imageNodeId: "39",
+          imageFieldName: "image"
         },
-        jobs: [{ mediaId: "media-1", label: "Image", prompt: "{\"a\":1}" }],
+        jobs: [{ mediaId: "media-1", label: "Image", imagePath: sourceImagePath, prompt: "{\"a\":1}" }],
         onStatus: () => undefined
       })).rejects.toThrow("outputs were not ready after 12 checks");
 
@@ -229,7 +359,7 @@ describe("runRunningHubImageGeneration", () => {
     }
   });
 
-  it("rejects uploaded workflow JSON that only previews images and cannot expose outputs", async () => {
+  it("rejects a missing image node before uploading or creating a task", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "runninghub-"));
     let createCalls = 0;
     const fetchImpl = (async (url: URL | RequestInfo) => {
@@ -252,11 +382,12 @@ describe("runRunningHubImageGeneration", () => {
           workflowId: "1904136902449209346",
           promptNodeId: "6",
           promptFieldName: "text",
-          workflowJson: "{\"25\":{\"class_type\":\"PreviewImage\",\"inputs\":{\"images\":[\"285\",0]}}}"
+          imageNodeId: "",
+          imageFieldName: "image"
         },
-        jobs: [{ mediaId: "media-1", label: "Image", prompt: "{\"a\":1}" }],
+        jobs: [{ mediaId: "media-1", label: "Image", imagePath: sourceImagePath, prompt: "{\"a\":1}" }],
         onStatus: () => undefined
-      })).rejects.toThrow("RunningHub workflow JSON must include a SaveImage node");
+      })).rejects.toThrow("Add RunningHub image node ID");
 
       expect(createCalls).toBe(0);
     } finally {
@@ -264,7 +395,7 @@ describe("runRunningHubImageGeneration", () => {
     }
   });
 
-  it("rejects SaveImage nodes connected to PreviewImage instead of final image data", async () => {
+  it("rejects a missing image field before uploading or creating a task", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "runninghub-"));
     let createCalls = 0;
     const fetchImpl = (async (url: URL | RequestInfo) => {
@@ -287,14 +418,12 @@ describe("runRunningHubImageGeneration", () => {
           workflowId: "1904136902449209346",
           promptNodeId: "6",
           promptFieldName: "text",
-          workflowJson: JSON.stringify({
-            "25": { class_type: "PreviewImage", inputs: { images: ["285", 0] } },
-            "292": { class_type: "SaveImage", inputs: { filename_prefix: "IMG_", images: ["25", 1] } }
-          })
+          imageNodeId: "39",
+          imageFieldName: ""
         },
-        jobs: [{ mediaId: "media-1", label: "Image", prompt: "{\"a\":1}" }],
+        jobs: [{ mediaId: "media-1", label: "Image", imagePath: sourceImagePath, prompt: "{\"a\":1}" }],
         onStatus: () => undefined
-      })).rejects.toThrow("SaveImage node 292 is connected to PreviewImage node 25");
+      })).rejects.toThrow("Add RunningHub image field name");
 
       expect(createCalls).toBe(0);
     } finally {
@@ -306,6 +435,9 @@ describe("runRunningHubImageGeneration", () => {
     const tempDir = await mkdtemp(join(tmpdir(), "runninghub-"));
     const fetchImpl = (async (url: URL | RequestInfo) => {
       const requestUrl = new URL(String(url));
+      if (requestUrl.pathname.endsWith("/task/openapi/upload")) {
+        return new Response(JSON.stringify({ code: 0, data: { fileName: "api/source.png" } }), { status: 200 });
+      }
       if (requestUrl.pathname.endsWith("/task/openapi/create")) {
         return new Response(JSON.stringify({ code: 0, data: { taskId: "task-1" } }), { status: 200 });
       }
@@ -331,9 +463,10 @@ describe("runRunningHubImageGeneration", () => {
           workflowId: "1904136902449209346",
           promptNodeId: "6",
           promptFieldName: "text",
-          workflowJson: workflowWithSaveImage
+          imageNodeId: "39",
+          imageFieldName: "image"
         },
-        jobs: [{ mediaId: "media-1", label: "First frame", prompt: "{\"a\":1}" }],
+        jobs: [{ mediaId: "media-1", label: "First frame", imagePath: sourceImagePath, prompt: "{\"a\":1}" }],
         onStatus: () => undefined
       });
 

@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import type { ImportAsset, ImportItem } from "../src/lib/importTypes";
 
@@ -15,12 +15,14 @@ export type RunningHubConfig = {
   workflowId: string;
   promptNodeId: string;
   promptFieldName: string;
-  workflowJson?: string;
+  imageNodeId: string;
+  imageFieldName: string;
 };
 
 export type RunningHubPromptJob = {
   mediaId: string;
   label: string;
+  imagePath: string;
   prompt: string;
 };
 
@@ -28,7 +30,6 @@ export type RunningHubCreatePayload = {
   apiKey: string;
   workflowId: string;
   instanceType: "plus";
-  workflow?: string;
   nodeInfoList: Array<{
     nodeId: string;
     fieldName: string;
@@ -58,19 +59,27 @@ export function buildRunningHubCreatePayload(input: {
   workflowId: string;
   promptNodeId: string;
   promptFieldName: string;
+  imageNodeId: string;
+  imageFieldName: string;
+  uploadedImageFileName: string;
   prompt: string;
-  workflowJson?: string;
 }): RunningHubCreatePayload {
   return {
     apiKey: input.apiKey,
     workflowId: input.workflowId,
     instanceType: "plus",
-    ...(input.workflowJson ? { workflow: input.workflowJson } : {}),
-    nodeInfoList: [{
-      nodeId: input.promptNodeId,
-      fieldName: input.promptFieldName,
-      fieldValue: input.prompt
-    }]
+    nodeInfoList: [
+      {
+        nodeId: input.imageNodeId,
+        fieldName: input.imageFieldName,
+        fieldValue: input.uploadedImageFileName
+      },
+      {
+        nodeId: input.promptNodeId,
+        fieldName: input.promptFieldName,
+        fieldValue: input.prompt
+      }
+    ]
   };
 }
 
@@ -96,6 +105,25 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
     options.onStatus?.({
       tone: "running",
       source: "runninghub",
+      message: `Uploading source image for ${passLabel}.`
+    });
+
+    let uploadedImageFileName: string;
+    try {
+      uploadedImageFileName = await uploadRunningHubImage({
+        apiKey: options.config.apiKey,
+        imagePath: job.imagePath,
+        fetchImpl,
+        baseUrl
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      throw new Error(`Could not upload source image for ${job.label}: ${message}`);
+    }
+
+    options.onStatus?.({
+      tone: "running",
+      source: "runninghub",
       message: `Creating RunningHub Plus task for ${passLabel}.`
     });
 
@@ -103,7 +131,8 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
       baseUrl,
       fetchImpl,
       config: options.config,
-      prompt: job.prompt
+      prompt: job.prompt,
+      uploadedImageFileName
     });
     taskIds.push(taskId);
 
@@ -185,109 +214,12 @@ function assertRunningHubConfig(config: RunningHubConfig): void {
   if (!config.promptFieldName.trim()) {
     throw new Error("Add RunningHub prompt field name on the Подключения tab before image generation.");
   }
-  assertWorkflowCanExposeOutputs(config.workflowJson);
-}
-
-function assertWorkflowCanExposeOutputs(workflowJson: string | undefined): void {
-  if (!workflowJson?.trim()) {
-    return;
+  if (!config.imageNodeId.trim()) {
+    throw new Error("Add RunningHub image node ID on the Подключения tab before image generation.");
   }
-
-  let workflow: unknown;
-  try {
-    workflow = JSON.parse(workflowJson);
-  } catch {
-    throw new Error("RunningHub workflow JSON is not valid JSON.");
+  if (!config.imageFieldName.trim()) {
+    throw new Error("Add RunningHub image field name on the Подключения tab before image generation.");
   }
-
-  const nodes = extractWorkflowNodes(workflow);
-  if (nodes.length === 0) {
-    return;
-  }
-
-  const hasSaveImage = nodes.some((node) => {
-    const name = `${node.classType} ${node.title}`.trim();
-    return /^SaveImage$/i.test(node.classType) || /\bsave\s*image\b/i.test(name);
-  });
-
-  if (!hasSaveImage) {
-    const previewNodes = nodes
-      .filter((node) => /preview/i.test(`${node.classType} ${node.title}`))
-      .map((node) => `${node.id}:${node.classType || node.title}`)
-      .slice(0, 5)
-      .join(", ");
-    const previewHint = previewNodes ? ` Found preview-only node(s): ${previewNodes}.` : "";
-    throw new Error(
-      `RunningHub workflow JSON must include a SaveImage node connected to the final image. PreviewImage only shows results in ComfyUI and does not expose files through /task/openapi/outputs.${previewHint}`
-    );
-  }
-
-  for (const saveNode of nodes.filter(isSaveImageNode)) {
-    const imageSourceId = getLinkedNodeId(saveNode.inputs.images);
-    if (!imageSourceId) {
-      continue;
-    }
-    const sourceNode = nodes.find((node) => node.id === imageSourceId);
-    if (sourceNode && isPreviewNode(sourceNode)) {
-      throw new Error(
-        `SaveImage node ${saveNode.id} is connected to PreviewImage node ${sourceNode.id}. Connect SaveImage.images to the final image source instead, for example the same node used by PreviewImage.images.`
-      );
-    }
-  }
-
-}
-
-type WorkflowNodeInfo = {
-  id: string;
-  classType: string;
-  title: string;
-  inputs: Record<string, unknown>;
-};
-
-function extractWorkflowNodes(workflow: unknown): WorkflowNodeInfo[] {
-  if (!workflow || typeof workflow !== "object") {
-    return [];
-  }
-
-  const record = workflow as Record<string, unknown>;
-  if (Array.isArray(record.nodes)) {
-    return record.nodes.flatMap((node) => extractWorkflowNode(node, undefined));
-  }
-
-  return Object.entries(record).flatMap(([id, node]) => extractWorkflowNode(node, id));
-}
-
-function extractWorkflowNode(node: unknown, fallbackId: string | undefined): WorkflowNodeInfo[] {
-  if (!node || typeof node !== "object") {
-    return [];
-  }
-
-  const record = node as Record<string, unknown>;
-  const meta = record._meta && typeof record._meta === "object" ? record._meta as Record<string, unknown> : {};
-  const inputs = record.inputs && typeof record.inputs === "object" && !Array.isArray(record.inputs)
-    ? record.inputs as Record<string, unknown>
-    : {};
-  return [{
-    id: String(record.id ?? fallbackId ?? ""),
-    classType: String(record.class_type ?? record.type ?? ""),
-    title: String(meta.title ?? record.title ?? ""),
-    inputs
-  }];
-}
-
-function isSaveImageNode(node: WorkflowNodeInfo): boolean {
-  return /^SaveImage$/i.test(node.classType) || /\bsave\s*image\b/i.test(`${node.classType} ${node.title}`);
-}
-
-function isPreviewNode(node: WorkflowNodeInfo): boolean {
-  return /preview/i.test(`${node.classType} ${node.title}`);
-}
-
-function getLinkedNodeId(value: unknown): string | undefined {
-  if (Array.isArray(value) && (typeof value[0] === "string" || typeof value[0] === "number")) {
-    return String(value[0]);
-  }
-  return undefined;
 }
 
 async function createTask(options: {
@@ -295,13 +227,16 @@ async function createTask(options: {
   fetchImpl: FetchLike;
   config: RunningHubConfig;
   prompt: string;
+  uploadedImageFileName: string;
 }): Promise<string> {
   const response = await postRunningHub(options.fetchImpl, new URL("/task/openapi/create", options.baseUrl), buildRunningHubCreatePayload({
     apiKey: options.config.apiKey,
     workflowId: options.config.workflowId,
     promptNodeId: options.config.promptNodeId,
     promptFieldName: options.config.promptFieldName,
-    workflowJson: options.config.workflowJson,
+    imageNodeId: options.config.imageNodeId,
+    imageFieldName: options.config.imageFieldName,
+    uploadedImageFileName: options.uploadedImageFileName,
     prompt: options.prompt
   }), "creating task");
   const payload = await response.json() as unknown;
@@ -311,6 +246,31 @@ async function createTask(options: {
     throw new Error(`RunningHub create task response did not include a taskId: ${JSON.stringify(payload)}`);
   }
   return taskId;
+}
+
+export async function uploadRunningHubImage(options: {
+  apiKey: string;
+  imagePath: string;
+  fetchImpl: FetchLike;
+  baseUrl: string;
+}): Promise<string> {
+  const form = new FormData();
+  form.set("apiKey", options.apiKey);
+  form.set("file", new Blob([await readFile(options.imagePath)]), basename(options.imagePath));
+
+  const response = await postRunningHubForm(
+    options.fetchImpl,
+    new URL("/task/openapi/upload", options.baseUrl),
+    form,
+    "uploading source image"
+  );
+  const payload = await response.json() as unknown;
+  assertRunningHubOk(payload, "upload source image");
+  const fileName = extractUploadedFileName(payload);
+  if (!fileName) {
+    throw new Error(`RunningHub upload source image response did not include data.fileName: ${JSON.stringify(payload)}`);
+  }
+  return fileName;
 }
 
 async function waitForTaskCompletion(options: {
@@ -420,6 +380,24 @@ async function postRunningHub(fetchImpl: FetchLike, url: URL, body: unknown, act
   return response;
 }
 
+async function postRunningHubForm(fetchImpl: FetchLike, url: URL, form: FormData, action: string): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: "POST",
+      body: form
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    throw new Error(`RunningHub request failed while ${action}: ${message}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(`RunningHub request failed while ${action} with ${response.status}: ${await response.text()}`);
+  }
+  return response;
+}
+
 function assertRunningHubOk(payload: unknown, action: string): void {
   if (!payload || typeof payload !== "object") {
     throw new Error(`RunningHub ${action} returned an invalid response.`);
@@ -447,6 +425,18 @@ function extractTaskId(payload: unknown): string | undefined {
   }
   const candidates = collectStringFields(payload, ["taskId", "task_id", "id"]);
   return candidates[0];
+}
+
+function extractUploadedFileName(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  const data = (payload as Record<string, unknown>).data;
+  if (!data || typeof data !== "object") {
+    return undefined;
+  }
+  const fileName = (data as Record<string, unknown>).fileName;
+  return typeof fileName === "string" && fileName.trim() ? fileName : undefined;
 }
 
 function extractStatus(payload: unknown): string | undefined {
