@@ -11,7 +11,8 @@ import { checkScrapeCreatorsPostAccess, importInstagramUrl } from "./instagramIm
 import { resolveImportMetadataPath } from "./localMetadata";
 import { generateOllamaPrompt, listOllamaModels } from "./ollamaClient";
 import { getActiveOllamaConfiguration } from "./ollamaConfiguration";
-import { runRunningHubImageGeneration } from "./runningHub";
+import { GenerationCancelledError, GenerationController, type GenerationOperation } from "./generationController";
+import { cancelRunningHubTask, runRunningHubImageGeneration } from "./runningHub";
 
 const port = Number(process.env.API_PORT ?? 4317);
 const projectRoot = process.cwd();
@@ -21,6 +22,7 @@ const outputDir = join(projectRoot, "output");
 const store = new ImportStore(dataDir);
 const connectionsStore = new ConnectionsStore(dataDir);
 const activityLog = new ActivityLog();
+const generationController = new GenerationController(cancelRunningHubTask);
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -288,8 +290,10 @@ app.post("/api/open-imports-folder", async (_request, response) => {
 });
 
 app.post("/api/generation/image-prompts", async (request, response) => {
+  let generation: GenerationOperation | undefined;
   try {
     const media = parsePromptMedia(request.body?.media);
+    generation = generationController.start();
     const connections = await connectionsStore.readPrivate();
     const ollama = getActiveOllamaConfiguration(connections);
     activityLog.publish({
@@ -299,6 +303,7 @@ app.post("/api/generation/image-prompts", async (request, response) => {
     });
     const prompts = [];
     for (const [index, mediaItem] of media.entries()) {
+      generation.throwIfCancelled();
       activityLog.publish({
         tone: "running",
         source: "prompt",
@@ -312,9 +317,11 @@ app.post("/api/generation/image-prompts", async (request, response) => {
           apiKey: ollama.apiKey,
           model: ollama.model,
           prompt: ollama.instruction,
-          imageBase64: await readFile(resolvePromptMediaImagePath(mediaItem.imagePath), "base64")
+          imageBase64: await readFile(resolvePromptMediaImagePath(mediaItem.imagePath), "base64"),
+          signal: generation.signal
         })
       };
+      generation.throwIfCancelled();
       prompts.push(generatedPrompt);
       activityLog.publish({
         tone: "ready",
@@ -332,14 +339,26 @@ app.post("/api/generation/image-prompts", async (request, response) => {
     await store.writeCurrentSession(session);
     response.json({ prompts, session });
   } catch (error) {
-    activityLog.publish({ tone: "error", source: "prompt", message: toErrorMessage(error) });
-    response.status(500).json({ error: toErrorMessage(error) });
+    if (isGenerationCancelled(error, generation)) {
+      activityLog.publish({ tone: "ready", source: "prompt", message: "Prompt generation cancelled." });
+      response.status(499).json({ error: "Generation cancelled." });
+    } else {
+      activityLog.publish({ tone: "error", source: "prompt", message: toErrorMessage(error) });
+      response.status(500).json({ error: toErrorMessage(error) });
+    }
+  } finally {
+    if (generation) {
+      generationController.finish(generation);
+    }
   }
 });
 
 app.post("/api/generation/images", async (request, response) => {
+  let generation: GenerationOperation | undefined;
   try {
     const jobs = parseRunningHubPromptJobs(request.body?.jobs);
+    const activeGeneration = generationController.start();
+    generation = activeGeneration;
     const connections = await connectionsStore.readPrivate();
     const currentSession = await store.readCurrentSession();
     activityLog.publish({
@@ -364,8 +383,14 @@ app.post("/api/generation/images", async (request, response) => {
         imagePath: resolvePromptMediaImagePath(job.media.imagePath),
         prompt: job.prompt
       })),
-      onStatus: (event) => activityLog.publish(event)
+      onStatus: (event) => activityLog.publish(event),
+      signal: activeGeneration.signal,
+      onTaskCreated: (taskId) => activeGeneration.registerRunningHubTask({
+        apiKey: connections.runningHubApiKey ?? "",
+        taskId
+      })
     });
+    generation.throwIfCancelled();
     await store.saveItem(runningHubResult.item);
     await store.appendToCurrentSession(runningHubResult.item.id, {
       sceneBibles: currentSession.sceneBibles,
@@ -377,9 +402,28 @@ app.post("/api/generation/images", async (request, response) => {
     const session = await store.readCurrentSession();
     response.json({ item: runningHubResult.item, session });
   } catch (error) {
-    activityLog.publish({ tone: "error", source: "generation", message: toErrorMessage(error) });
-    response.status(500).json({ error: toErrorMessage(error) });
+    if (isGenerationCancelled(error, generation)) {
+      activityLog.publish({ tone: "ready", source: "generation", message: "Image generation cancelled." });
+      response.status(499).json({ error: "Generation cancelled." });
+    } else {
+      activityLog.publish({ tone: "error", source: "generation", message: toErrorMessage(error) });
+      response.status(500).json({ error: toErrorMessage(error) });
+    }
+  } finally {
+    if (generation) {
+      generationController.finish(generation);
+    }
   }
+});
+
+app.post("/api/generation/cancel", async (_request, response) => {
+  const cancelled = await generationController.cancel();
+  activityLog.publish({
+    tone: "ready",
+    source: "generation",
+    message: cancelled ? "Generation cancellation requested." : "No active generation to cancel."
+  });
+  response.json({ cancelled });
 });
 
 const host = process.env.API_HOST ?? "127.0.0.1";
@@ -415,6 +459,12 @@ function formatDateFolder(date: Date): string {
 
 function imageExtension(contentType: string): string {
   return contentType === "image/jpeg" ? ".jpg" : contentType === "image/webp" ? ".webp" : contentType === "image/gif" ? ".gif" : ".png";
+}
+
+function isGenerationCancelled(error: unknown, generation: { signal: AbortSignal } | undefined): boolean {
+  return generation?.signal.aborted === true
+    || error instanceof GenerationCancelledError
+    || (error instanceof DOMException && error.name === "AbortError");
 }
 
 function optionalString(value: unknown): string | undefined {

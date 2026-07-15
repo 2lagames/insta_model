@@ -41,7 +41,7 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("Локальная Ollama");
     expect(appSource).toContain("Image node ID");
     expect(appSource).toContain('aria-label="Отменить изменение промта"');
-    expect(appSource).toContain("generateImages(imageJobs)");
+    expect(appSource).toContain("generateImagesWithOptions([imageJob], { signal: abortController.signal })");
     expect(appSource).not.toContain("workflow-file-control");
     expect(cssSource).toContain("aspect-ratio: 9 / 16");
     expect(cssSource).toContain(".gallery-select");
@@ -75,8 +75,8 @@ describe("studio preview layout", () => {
     expect(preview).toContain('<div className="media-column">\n          <div className="panel-label">Media</div>\n          <MediaSelector');
     expect(mediaSelector).not.toContain('className="panel-label"');
     expect(mediaSelector).toContain('className="media-list"');
-    expect(mediaSelector).toContain(">Выбрать все</button>");
-    expect(mediaSelector.indexOf('className="media-list"')).toBeLessThan(mediaSelector.indexOf(">Выбрать все</button>"));
+    expect(mediaSelector).toContain('"Снять выделение" : "Выбрать все"');
+    expect(mediaSelector.indexOf('className="media-list"')).toBeLessThan(mediaSelector.indexOf('"Снять выделение" : "Выбрать все"'));
     expect(cssSource).toContain(".media-list");
     expect(cssSource).toContain(".media-list {\n  min-height: 0;\n  flex: 1;");
     expect(cssSource).toContain(".media-list {\n  min-height: 0;\n  flex: 1;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  overflow-y: auto;");
@@ -171,9 +171,31 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("multiple");
     expect(appSource).toContain("event.target.files");
     expect(appSource).toContain("appendToSession: index > 0");
-    expect(appSource).toContain("onSelectAll={() => setSelectedForGeneration(materials.map((material) => material.id))}");
+    expect(appSource).toContain("toggleAllMediaSelection(current, materials.map((material) => material.id))");
+    expect(appSource).toContain('hasEveryMaterialSelected ? "Снять выделение" : "Выбрать все"');
     expect(appSource).toContain("setSelectedForGeneration([])");
-    expect(appSource).toContain("await createSelectedPrompts()");
+    expect(appSource).toContain("await createSelectedPrompts(abortController.signal)");
+  });
+
+  it("shows a cancellation action in the generation workspace and uses IMAGE labels", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+
+    expect(appSource).toContain("cancelGeneration");
+    expect(appSource).toContain("onCancelGeneration");
+    expect(appSource).toContain(">Отмена</button>");
+    expect(appSource).toContain("Настройки");
+  });
+
+  it("adds each generated image to the studio before starting the next image job", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const generationStart = appSource.indexOf("async function handleGenerateImages()");
+    const generationHandler = appSource.slice(generationStart, appSource.indexOf("function handleCancelGeneration", generationStart));
+
+    expect(generationHandler).toContain("for (const imageJob of imageJobs)");
+    expect(generationHandler).toContain("await generateImagesWithOptions([imageJob], { signal: abortController.signal })");
+    expect(generationHandler).toContain("setItems((current) => [generated.item");
+    expect(generationHandler).toContain("setCurrentSession(generated.session)");
+    expect(generationHandler).toContain("setSessionMediaItemIds(generated.session.itemIds)");
   });
 
   it("keeps every successful batch upload reflected locally before a later upload can fail", () => {

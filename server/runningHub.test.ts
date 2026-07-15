@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   buildRunningHubCreatePayload,
+  cancelRunningHubTask,
   runRunningHubImageGeneration,
   type RunningHubPromptJob
 } from "./runningHub";
@@ -38,6 +39,25 @@ describe("buildRunningHubCreatePayload", () => {
           fieldValue: "{\"high_level_description\":\"A model in the city\"}"
         }
       ]
+    });
+  });
+});
+
+describe("cancelRunningHubTask", () => {
+  it("posts the API key and task id to RunningHub's cancellation endpoint", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 0, data: null }))) as typeof fetch;
+
+    await cancelRunningHubTask({
+      apiKey: "runninghub-key",
+      taskId: "task-1",
+      baseUrl: "https://runninghub.example.com",
+      fetchImpl
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(new URL("/task/openapi/cancel", "https://runninghub.example.com"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "runninghub-key", taskId: "task-1" })
     });
   });
 });

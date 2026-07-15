@@ -19,6 +19,7 @@ export type GenerateOllamaPromptInput = {
   prompt: string;
   imageBase64: string;
   fetchImpl?: FetchLike;
+  signal?: AbortSignal;
 };
 
 const cloudBaseUrl = "https://ollama.com";
@@ -46,7 +47,8 @@ export async function generateOllamaPrompt(input: GenerateOllamaPromptInput): Pr
       prompt: input.prompt,
       images: [input.imageBase64],
       stream: false
-    })
+    }),
+    ...(input.signal ? { signal: input.signal } : {})
   });
   if (!response.ok) {
     throw new Error(`Ollama prompt generation failed with ${response.status}: ${await response.text()}`);

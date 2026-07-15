@@ -117,6 +117,16 @@ describe("image prompt activity", () => {
     expect(imageRoute).not.toContain("generateIdeogramPromptForMedia");
     expect(imageRoute).not.toContain("workflowJson");
     expect(imageRoute).toContain("imagePath: resolvePromptMediaImagePath(job.media.imagePath)");
+    expect(imageRoute).toContain("onTaskCreated");
+    expect(imageRoute).toContain("activeGeneration.registerRunningHubTask");
+  });
+
+  it("exposes one cancellation route for active generation work", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+
+    expect(source).toContain('app.post("/api/generation/cancel"');
+    expect(source).toContain("generationController.cancel()");
+    expect(source).toContain("Generation cancellation requested.");
   });
 
   it("persists explicitly saved prompt text in the current session", () => {

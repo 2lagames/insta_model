@@ -287,12 +287,17 @@ export async function saveSessionPrompts(prompts: Record<string, string>): Promi
 }
 
 export async function generateImagePrompts(media: PromptMediaInput[]): Promise<PromptGenerationResult> {
+  return await generateImagePromptsWithOptions(media);
+}
+
+export async function generateImagePromptsWithOptions(media: PromptMediaInput[], options: { signal?: AbortSignal } = {}): Promise<PromptGenerationResult> {
   const response = await apiFetch("/api/generation/image-prompts", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ media })
+    body: JSON.stringify({ media }),
+    ...(options.signal ? { signal: options.signal } : {})
   });
   await assertOk(response);
   const data = await response.json() as PromptGenerationResponse;
@@ -303,12 +308,17 @@ export async function generateImagePrompts(media: PromptMediaInput[]): Promise<P
 }
 
 export async function generateImages(jobs: ImageGenerationJobInput[]): Promise<ImageGenerationResult> {
+  return await generateImagesWithOptions(jobs);
+}
+
+export async function generateImagesWithOptions(jobs: ImageGenerationJobInput[], options: { signal?: AbortSignal } = {}): Promise<ImageGenerationResult> {
   const response = await apiFetch("/api/generation/images", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ jobs })
+    body: JSON.stringify({ jobs }),
+    ...(options.signal ? { signal: options.signal } : {})
   });
   await assertOk(response);
   const data = await response.json() as ImageGenerationResponse;
@@ -316,6 +326,12 @@ export async function generateImages(jobs: ImageGenerationJobInput[]): Promise<I
     item: data.item,
     session: data.session ?? createEmptySession()
   };
+}
+
+export async function cancelGeneration(): Promise<{ cancelled: boolean }> {
+  const response = await apiFetch("/api/generation/cancel", { method: "POST" });
+  await assertOk(response);
+  return await response.json() as { cancelled: boolean };
 }
 
 function createEmptySession(itemIds: string[] = []): CurrentMediaSession {
@@ -330,6 +346,9 @@ async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
   try {
     return init ? await fetch(input, init) : await fetch(input);
   } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
     const message = error instanceof Error ? error.message : "unknown network error";
     throw new Error(`Local API is not reachable. Make sure ./start.sh is running and http://127.0.0.1:4317/api/health responds. Original error: ${message}`);
   }

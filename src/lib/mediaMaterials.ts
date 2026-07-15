@@ -82,9 +82,17 @@ export function createSessionMediaMaterials(
     .map((id) => items.find((item) => item.id === id))
     .filter((item): item is ImportItem => Boolean(item));
 
-  if (orderedItems.length === 0 && selectedItem && !isMediaSessionReset) {
-    return createMediaMaterials(selectedItem);
-  }
+  const materials = orderedItems.length === 0 && selectedItem && !isMediaSessionReset
+    ? createMediaMaterials(selectedItem)
+    : orderedItems.flatMap(createMediaMaterials);
 
-  return orderedItems.flatMap(createMediaMaterials);
+  let imageNumber = 0;
+  return materials.map((material) => {
+    if (material.mediaType !== "image") {
+      return material;
+    }
+
+    imageNumber += 1;
+    return { ...material, label: `IMAGE ${imageNumber}` };
+  });
 }

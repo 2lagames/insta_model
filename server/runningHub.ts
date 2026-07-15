@@ -52,6 +52,8 @@ type RunningHubGenerationOptions = {
   maxPolls?: number;
   now?: Date;
   onStatus?: StatusCallback;
+  signal?: AbortSignal;
+  onTaskCreated?: (taskId: string) => void;
 };
 
 export function buildRunningHubCreatePayload(input: {
@@ -101,6 +103,7 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
   await mkdir(outputDateDir, { recursive: true });
 
   for (const [jobIndex, job] of options.jobs.entries()) {
+    throwIfAborted(options.signal);
     const passLabel = `${job.label} (${jobIndex + 1}/${options.jobs.length})`;
     options.onStatus?.({
       tone: "running",
@@ -114,7 +117,8 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
         apiKey: options.config.apiKey,
         imagePath: job.imagePath,
         fetchImpl,
-        baseUrl
+        baseUrl,
+        signal: options.signal
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown error";
@@ -132,9 +136,12 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
       fetchImpl,
       config: options.config,
       prompt: job.prompt,
-      uploadedImageFileName
+      uploadedImageFileName,
+      signal: options.signal
     });
     taskIds.push(taskId);
+    options.onTaskCreated?.(taskId);
+    throwIfAborted(options.signal);
 
     options.onStatus?.({
       tone: "running",
@@ -148,7 +155,8 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
       taskId,
       pollIntervalMs: options.pollIntervalMs ?? defaultPollIntervalMs,
       maxPolls: options.maxPolls ?? defaultMaxPolls,
-      onStatus: options.onStatus
+      onStatus: options.onStatus,
+      signal: options.signal
     });
 
     const imageUrls = await waitForTaskOutputs({
@@ -158,7 +166,8 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
       taskId,
       pollIntervalMs: options.pollIntervalMs ?? defaultPollIntervalMs,
       maxPolls: options.maxPolls ?? defaultOutputMaxPolls,
-      onStatus: options.onStatus
+      onStatus: options.onStatus,
+      signal: options.signal
     });
 
     options.onStatus?.({
@@ -173,7 +182,8 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
       taskId,
       sourceMediaId: job.mediaId,
       url,
-      outputIndex
+      outputIndex,
+      signal: options.signal
     })));
     allAssets.push(...savedAssets);
   }
@@ -228,6 +238,7 @@ async function createTask(options: {
   config: RunningHubConfig;
   prompt: string;
   uploadedImageFileName: string;
+  signal?: AbortSignal;
 }): Promise<string> {
   const response = await postRunningHub(options.fetchImpl, new URL("/task/openapi/create", options.baseUrl), buildRunningHubCreatePayload({
     apiKey: options.config.apiKey,
@@ -238,7 +249,7 @@ async function createTask(options: {
     imageFieldName: options.config.imageFieldName,
     uploadedImageFileName: options.uploadedImageFileName,
     prompt: options.prompt
-  }), "creating task");
+  }), "creating task", options.signal);
   const payload = await response.json() as unknown;
   assertRunningHubOk(payload, "create task");
   const taskId = extractTaskId(payload);
@@ -253,6 +264,7 @@ export async function uploadRunningHubImage(options: {
   imagePath: string;
   fetchImpl: FetchLike;
   baseUrl: string;
+  signal?: AbortSignal;
 }): Promise<string> {
   const form = new FormData();
   form.set("apiKey", options.apiKey);
@@ -262,7 +274,8 @@ export async function uploadRunningHubImage(options: {
     options.fetchImpl,
     new URL("/task/openapi/upload", options.baseUrl),
     form,
-    "uploading source image"
+    "uploading source image",
+    options.signal
   );
   const payload = await response.json() as unknown;
   assertRunningHubOk(payload, "upload source image");
@@ -281,12 +294,14 @@ async function waitForTaskCompletion(options: {
   pollIntervalMs: number;
   maxPolls: number;
   onStatus?: StatusCallback;
+  signal?: AbortSignal;
 }): Promise<void> {
   for (let attempt = 1; attempt <= options.maxPolls; attempt += 1) {
+    throwIfAborted(options.signal);
     const response = await postRunningHub(options.fetchImpl, new URL("/task/openapi/status", options.baseUrl), {
       apiKey: options.apiKey,
       taskId: options.taskId
-    }, `checking task ${options.taskId}`);
+    }, `checking task ${options.taskId}`, options.signal);
     const payload = await response.json() as unknown;
     assertRunningHubOk(payload, `check task ${options.taskId}`);
     const status = extractStatus(payload);
@@ -303,7 +318,7 @@ async function waitForTaskCompletion(options: {
     if (isFailureStatus(status)) {
       throw new Error(`RunningHub task ${options.taskId} failed with status: ${status}`);
     }
-    await sleep(options.pollIntervalMs);
+    await sleep(options.pollIntervalMs, options.signal);
   }
 
   throw new Error(`RunningHub task ${options.taskId} did not finish after ${options.maxPolls} status checks.`);
@@ -314,11 +329,12 @@ async function fetchTaskOutputs(options: {
   baseUrl: string;
   fetchImpl: FetchLike;
   taskId: string;
+  signal?: AbortSignal;
 }): Promise<string[]> {
   const response = await postRunningHub(options.fetchImpl, new URL("/task/openapi/outputs", options.baseUrl), {
     apiKey: options.apiKey,
     taskId: options.taskId
-  }, `loading task ${options.taskId} outputs`);
+  }, `loading task ${options.taskId} outputs`, options.signal);
   const payload = await response.json() as unknown;
   assertRunningHubOk(payload, `load task ${options.taskId} outputs`);
   return extractImageUrls(payload);
@@ -332,15 +348,18 @@ async function waitForTaskOutputs(options: {
   pollIntervalMs: number;
   maxPolls: number;
   onStatus?: StatusCallback;
+  signal?: AbortSignal;
 }): Promise<string[]> {
   let lastCount = 0;
 
   for (let attempt = 1; attempt <= options.maxPolls; attempt += 1) {
+    throwIfAborted(options.signal);
     const urls = await fetchTaskOutputs({
       apiKey: options.apiKey,
       baseUrl: options.baseUrl,
       fetchImpl: options.fetchImpl,
-      taskId: options.taskId
+      taskId: options.taskId,
+      signal: options.signal
     });
     lastCount = urls.length;
 
@@ -353,23 +372,24 @@ async function waitForTaskOutputs(options: {
       source: "runninghub",
       message: `RunningHub task ${options.taskId}: outputs are not ready yet (0 images, ${attempt}/${options.maxPolls}).`
     });
-    await sleep(options.pollIntervalMs);
+    await sleep(options.pollIntervalMs, options.signal);
   }
 
   throw new Error(`RunningHub task ${options.taskId} outputs were not ready after ${options.maxPolls} checks (${lastCount} image URLs found).`);
 }
 
-async function postRunningHub(fetchImpl: FetchLike, url: URL, body: unknown, action: string): Promise<Response> {
+async function postRunningHub(fetchImpl: FetchLike, url: URL, body: unknown, action: string, signal?: AbortSignal): Promise<Response> {
   let response: Response;
   try {
-    response = await fetchImpl(url, {
+    response = await fetchImpl(url, withSignal({
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify(body)
-    });
+    }, signal));
   } catch (error) {
+    throwIfAborted(signal);
     const message = error instanceof Error ? error.message : "unknown error";
     throw new Error(`RunningHub request failed while ${action}: ${message}`);
   }
@@ -380,14 +400,15 @@ async function postRunningHub(fetchImpl: FetchLike, url: URL, body: unknown, act
   return response;
 }
 
-async function postRunningHubForm(fetchImpl: FetchLike, url: URL, form: FormData, action: string): Promise<Response> {
+async function postRunningHubForm(fetchImpl: FetchLike, url: URL, form: FormData, action: string, signal?: AbortSignal): Promise<Response> {
   let response: Response;
   try {
-    response = await fetchImpl(url, {
+    response = await fetchImpl(url, withSignal({
       method: "POST",
       body: form
-    });
+    }, signal));
   } catch (error) {
+    throwIfAborted(signal);
     const message = error instanceof Error ? error.message : "unknown error";
     throw new Error(`RunningHub request failed while ${action}: ${message}`);
   }
@@ -484,8 +505,12 @@ async function downloadOutputImage(options: {
   sourceMediaId: string;
   url: string;
   outputIndex: number;
+  signal?: AbortSignal;
 }): Promise<ImportAsset> {
-  const response = await options.fetchImpl(options.url);
+  throwIfAborted(options.signal);
+  const response = options.signal
+    ? await options.fetchImpl(options.url, { signal: options.signal })
+    : await options.fetchImpl(options.url);
   if (!response.ok) {
     throw new Error(`Could not download RunningHub output ${options.url}: ${response.status} ${await response.text()}`);
   }
@@ -539,6 +564,37 @@ function formatDateFolder(date: Date): string {
   return `${year}${month}${day}`;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+export async function cancelRunningHubTask(options: {
+  apiKey: string;
+  taskId: string;
+  fetchImpl?: FetchLike;
+  baseUrl?: string;
+}): Promise<void> {
+  const response = await postRunningHub(
+    options.fetchImpl ?? fetch,
+    new URL("/task/openapi/cancel", options.baseUrl ?? defaultRunningHubBaseUrl),
+    { apiKey: options.apiKey, taskId: options.taskId },
+    `cancelling task ${options.taskId}`
+  );
+  assertRunningHubOk(await response.json() as unknown, `cancel task ${options.taskId}`);
+}
+
+function withSignal(init: RequestInit, signal: AbortSignal | undefined): RequestInit {
+  return signal ? { ...init, signal } : init;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new DOMException("Generation cancelled.", "AbortError");
+  }
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timeout);
+      reject(new DOMException("Generation cancelled.", "AbortError"));
+    }, { once: true });
+  });
 }

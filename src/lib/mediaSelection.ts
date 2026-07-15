@@ -5,3 +5,9 @@ export function toggleMediaSelection(currentIds: string[], mediaId: string): str
 
   return [...currentIds, mediaId];
 }
+
+export function toggleAllMediaSelection(currentIds: string[], materialIds: string[]): string[] {
+  const selectedIds = new Set(currentIds);
+  const hasEveryMaterial = materialIds.every((id) => selectedIds.has(id));
+  return hasEveryMaterial ? [] : materialIds;
+}

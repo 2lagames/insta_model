@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  cancelGeneration,
   clearConnectionKey,
   cleanupDuplicateImports,
   generateImagePrompts,
@@ -169,6 +170,18 @@ describe("generateImagePrompts", () => {
         }
       }
     });
+  });
+});
+
+describe("cancelGeneration", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("posts to the unified generation cancellation endpoint", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ cancelled: true })));
+
+    await expect(cancelGeneration()).resolves.toEqual({ cancelled: true });
+
+    expect(fetchSpy).toHaveBeenCalledWith("/api/generation/cancel", { method: "POST" });
   });
 });
 

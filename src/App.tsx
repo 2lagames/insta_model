@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   checkInstagramUrl,
+  cancelGeneration,
   clearConnectionKey,
-  generateImagePrompts,
-  generateImages,
+  generateImagePromptsWithOptions,
+  generateImagesWithOptions,
   getConnections,
   getHealth,
   importInstagramUrl,
@@ -21,7 +22,7 @@ import {
 import type { CurrentMediaSession, ImportItem, SceneBible } from "./lib/importTypes";
 import { validateInstagramUrl } from "./lib/instagramUrl";
 import { createMediaMaterials, createSessionMediaMaterials, type MediaMaterial } from "./lib/mediaMaterials";
-import { toggleMediaSelection } from "./lib/mediaSelection";
+import { toggleAllMediaSelection, toggleMediaSelection } from "./lib/mediaSelection";
 import {
   createPromptTextRecord,
   editPromptDocument,
@@ -110,6 +111,7 @@ export default function App() {
   const isPromptAutosaveReadyRef = useRef(false);
   const localImageInputRef = useRef<HTMLInputElement | null>(null);
   const isSessionMutationBusyRef = useRef(false);
+  const generationAbortControllerRef = useRef<AbortController | null>(null);
   const isSessionMutationBusy = isImporting || isResetting || isSavingPrompt || isGeneratingPrompt || isGeneratingImages;
 
   function tryBeginSessionMutation() {
@@ -446,7 +448,7 @@ export default function App() {
     }
   }
 
-  async function createSelectedPrompts(): Promise<Array<{ mediaId: string; label: string; prompt: string }>> {
+  async function createSelectedPrompts(signal?: AbortSignal): Promise<Array<{ mediaId: string; label: string; prompt: string }>> {
     const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
     const documentsByMediaId = new Map(promptDocuments.map((document) => [document.mediaId, document]));
     const missingPromptMedia = selectedPromptMedia.filter((media) => !documentsByMediaId.has(media.id));
@@ -461,16 +463,22 @@ export default function App() {
     setConnections(savedConnections);
 
     let generatedPrompts: Array<{ mediaId: string; label: string; prompt: string }> = [];
-    if (missingPromptMedia.length > 0) {
-      const generated = await generateImagePrompts(missingPromptMedia);
-      const prefix = parseGenerationPrefixes(generationPrefixOptions).find((item) => item.name === generationPrefixSelection)?.text;
-      generatedPrompts = generated.prompts.map((item) => ({
-        ...item,
-        prompt: prefix ? `${prefix}, ${item.prompt}` : item.prompt
-      }));
-      setPromptDocuments((current) => mergePromptDocuments(current, generatedPrompts));
-      setCurrentSession(generated.session);
-      setSessionMediaItemIds(generated.session.itemIds);
+    const prefix = parseGenerationPrefixes(generationPrefixOptions).find((item) => item.name === generationPrefixSelection)?.text;
+    for (const media of missingPromptMedia) {
+      const generated = await generateImagePromptsWithOptions([media], { signal });
+      const generatedPrompt = generated.prompts[0];
+      if (!generatedPrompt) {
+        continue;
+      }
+      const prompt = {
+        ...generatedPrompt,
+        prompt: prefix ? `${prefix}, ${generatedPrompt.prompt}` : generatedPrompt.prompt
+      };
+      generatedPrompts.push(prompt);
+      setPromptDocuments((current) => mergePromptDocuments(current, [prompt]));
+      const savedSession = await saveSessionPrompts({ [prompt.mediaId]: prompt.prompt });
+      setCurrentSession(savedSession);
+      setSessionMediaItemIds(savedSession.itemIds);
       setIsMediaSessionReset(false);
     }
 
@@ -496,16 +504,20 @@ export default function App() {
     }
 
     setIsGeneratingPrompt(true);
+    const abortController = new AbortController();
+    generationAbortControllerRef.current = abortController;
     recordStatus({ tone: "running", message: "Generating prompts with the selected Ollama model." });
     try {
-      const selectedPrompts = await createSelectedPrompts();
-      const savedSession = await saveSessionPrompts(Object.fromEntries(selectedPrompts.map((prompt) => [prompt.mediaId, prompt.prompt])));
-      setCurrentSession(savedSession);
-      setSessionMediaItemIds(savedSession.itemIds);
+      await createSelectedPrompts(abortController.signal);
     } catch (error) {
-      recordStatus({ tone: "error", message: toErrorMessage(error) });
+      if (!isAbortError(error)) {
+        recordStatus({ tone: "error", message: toErrorMessage(error) });
+      }
     } finally {
       setIsGeneratingPrompt(false);
+      if (generationAbortControllerRef.current === abortController) {
+        generationAbortControllerRef.current = null;
+      }
       endSessionMutation();
     }
   }
@@ -566,30 +578,50 @@ export default function App() {
     }
 
     setIsGeneratingImages(true);
+    const abortController = new AbortController();
+    generationAbortControllerRef.current = abortController;
     recordStatus({ tone: "running", message: "Sending the current edited prompts and source images to RunningHub." });
     try {
-      const selectedPrompts = await createSelectedPrompts();
+      const selectedPrompts = await createSelectedPrompts(abortController.signal);
       const promptsByMediaId = new Map(selectedPrompts.map((prompt) => [prompt.mediaId, prompt.prompt]));
       const imageJobs = selectedPromptMedia.flatMap((media) => {
         const prompt = promptsByMediaId.get(media.id);
         return prompt === undefined ? [] : [{ media, prompt }];
       });
-      const savedSession = await saveSessionPrompts(Object.fromEntries(selectedPrompts.map((prompt) => [prompt.mediaId, prompt.prompt])));
-      setCurrentSession(savedSession);
-      setSessionMediaItemIds(savedSession.itemIds);
-      const generated = await generateImages(imageJobs);
-      setItems((current) => [generated.item, ...current.filter((item) => item.id !== generated.item.id)]);
-      const generatedMedia = createMediaMaterials(generated.item);
-      setCurrentSession(generated.session);
-      setSessionMediaItemIds(generated.session.itemIds);
-      setIsMediaSessionReset(false);
-      setSelectedForGeneration((current) => current.filter((id) => !generatedMedia.some((material) => material.id === id)));
+      for (const imageJob of imageJobs) {
+        const generated = await generateImagesWithOptions([imageJob], { signal: abortController.signal });
+        setItems((current) => [generated.item, ...current.filter((item) => item.id !== generated.item.id)]);
+        const generatedMedia = createMediaMaterials(generated.item);
+        setCurrentSession(generated.session);
+        setSessionMediaItemIds(generated.session.itemIds);
+        setIsMediaSessionReset(false);
+        setSelectedForGeneration((current) => current.filter((id) => !generatedMedia.some((material) => material.id === id)));
+      }
     } catch (error) {
-      recordStatus({ tone: "error", message: toErrorMessage(error) });
+      if (!isAbortError(error)) {
+        recordStatus({ tone: "error", message: toErrorMessage(error) });
+      }
     } finally {
       setIsGeneratingImages(false);
+      if (generationAbortControllerRef.current === abortController) {
+        generationAbortControllerRef.current = null;
+      }
       endSessionMutation();
     }
+  }
+
+  function handleCancelGeneration() {
+    generationAbortControllerRef.current?.abort();
+    generationAbortControllerRef.current = null;
+    setIsGeneratingPrompt(false);
+    setIsGeneratingImages(false);
+    endSessionMutation();
+    recordStatus({ tone: "ready", message: "Generation cancellation requested." });
+    void cancelGeneration().catch((error: unknown) => {
+      if (!isAbortError(error)) {
+        recordStatus({ tone: "error", message: toErrorMessage(error) });
+      }
+    });
   }
 
   async function handleCopyStatusLog() {
@@ -720,7 +752,7 @@ export default function App() {
           onClick={() => setActiveTab("connections")}
           type="button"
         >
-          Подключения
+          Настройки
         </button>
         {activeTab === "studio" ? (
           <button
@@ -787,6 +819,7 @@ export default function App() {
                 isGeneratingImages={isGeneratingImages}
                 onGenerateImages={handleGenerateImages}
                 onGenerateImagePrompts={handleGenerateImagePrompts}
+                onCancelGeneration={handleCancelGeneration}
                 onSavePrompt={handleSavePrompt}
                 onSelectMaterial={(material) => {
                   setSelectedItemId(material.importItem.id);
@@ -815,7 +848,7 @@ export default function App() {
         </>
       ) : (
         <section className="connections-page">
-          <div className="panel-label">Подключения</div>
+          <div className="panel-label">Настройки</div>
           <div className="connection-card scrapecreators-card">
             <div>
               <h2>ScrapeCreators</h2>
@@ -932,6 +965,7 @@ function Preview({
   isGeneratingImages,
   onGenerateImages,
   onGenerateImagePrompts,
+  onCancelGeneration,
   onSavePrompt,
   onSelectMaterial,
   onToggleMaterial,
@@ -952,6 +986,7 @@ function Preview({
   isGeneratingImages: boolean;
   onGenerateImages: () => void;
   onGenerateImagePrompts: () => void;
+  onCancelGeneration: () => void;
   onSavePrompt: (mediaId: string) => void;
   onSelectMaterial: (material: MediaMaterial) => void;
   onToggleMaterial: (materialId: string) => void;
@@ -982,7 +1017,7 @@ function Preview({
         </div>
         <div className="media-column">
           <div className="panel-label">Media</div>
-          <MediaSelector materials={materials} onSelect={onSelectMaterial} onSelectAll={() => setSelectedForGeneration(materials.map((material) => material.id))} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
+          <MediaSelector materials={materials} onSelect={onSelectMaterial} onSelectAll={() => setSelectedForGeneration((current) => toggleAllMediaSelection(current, materials.map((material) => material.id)))} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
         </div>
         <aside className="preview-details"><div className="panel-label">Info</div>
           <div className="info-content">
@@ -1024,6 +1059,7 @@ function Preview({
           isGeneratingPrompt={isGeneratingPrompt}
           onGenerateImages={onGenerateImages}
           onGenerateImagePrompts={onGenerateImagePrompts}
+          onCancelGeneration={onCancelGeneration}
           selectedForGenerationCount={selectedForGenerationCount}
         />
       </div>
@@ -1059,6 +1095,7 @@ function GenerationWorkspace({
   isGeneratingPrompt,
   onGenerateImages,
   onGenerateImagePrompts,
+  onCancelGeneration,
   selectedForGenerationCount
 }: {
   generationPrefixOptions: string;
@@ -1070,6 +1107,7 @@ function GenerationWorkspace({
   isGeneratingPrompt: boolean;
   onGenerateImages: () => void;
   onGenerateImagePrompts: () => void;
+  onCancelGeneration: () => void;
   selectedForGenerationCount: number;
 }) {
   return (
@@ -1092,6 +1130,7 @@ function GenerationWorkspace({
       <button disabled type="button">Video generation</button>
       <button disabled type="button">Trend analysis</button>
       <button disabled type="button">Caption and hashtags</button>
+      <button onClick={onCancelGeneration} type="button">Отмена</button>
     </aside></div>
   );
 }
@@ -1111,6 +1150,8 @@ function MediaSelector({
   selected?: MediaMaterial;
   selectedForGeneration: string[];
 }) {
+  const hasEveryMaterialSelected = materials.length > 0 && materials.every((material) => selectedForGeneration.includes(material.id));
+
   return (
     <aside className="media-selector">
       <div className="media-list">
@@ -1127,7 +1168,7 @@ function MediaSelector({
           </div>
         ))}
       </div>
-      <button onClick={onSelectAll} type="button">Выбрать все</button>
+      <button onClick={onSelectAll} type="button">{hasEveryMaterialSelected ? "Снять выделение" : "Выбрать все"}</button>
     </aside>
   );
 }
@@ -1342,6 +1383,10 @@ function createSelectedPromptMedia(
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function formatActivityLogForCopy(entries: ActivityLogEntry[]): string {
