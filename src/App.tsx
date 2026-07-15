@@ -247,8 +247,14 @@ export default function App() {
 
     const revision = promptAutosaveRevisionRef.current;
     const prompts = createPromptTextRecord(promptDocuments);
-    const timeout = window.setTimeout(() => {
+    let retryTimeout: number | undefined;
+    const attemptAutosave = () => {
       if (revision !== promptAutosaveRevisionRef.current) {
+        return;
+      }
+
+      if (!tryBeginSessionMutation()) {
+        retryTimeout = window.setTimeout(attemptAutosave, 100);
         return;
       }
 
@@ -264,10 +270,20 @@ export default function App() {
           if (revision === promptAutosaveRevisionRef.current) {
             recordStatus({ tone: "error", message: `Could not autosave prompt locally: ${toErrorMessage(error)}` });
           }
+        })
+        .finally(() => {
+          endSessionMutation();
         });
-    }, 600);
+    };
 
-    return () => window.clearTimeout(timeout);
+    const timeout = window.setTimeout(attemptAutosave, 600);
+
+    return () => {
+      window.clearTimeout(timeout);
+      if (retryTimeout !== undefined) {
+        window.clearTimeout(retryTimeout);
+      }
+    };
   }, [promptDocuments]);
 
   async function handleImport(forceRefresh = false) {

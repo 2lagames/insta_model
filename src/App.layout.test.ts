@@ -146,10 +146,23 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("promptAutosaveRevisionRef");
     expect(appSource).toContain("isPromptAutosaveReadyRef");
     expect(appSource).toContain("window.setTimeout");
-    expect(appSource).toContain("}, 600)");
+    expect(appSource).toContain("window.setTimeout(attemptAutosave, 600)");
     expect(appSource).toContain("saveSessionPrompts(prompts)");
     expect(appSource.match(/promptAutosaveRevisionRef\.current \+= 1/g)?.length).toBeGreaterThanOrEqual(3);
     expect(appSource.match(/isPromptAutosaveReadyRef\.current = true/g)?.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("retries a current prompt autosave after acquiring the shared session mutation lock", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const autosaveStart = appSource.indexOf("useEffect(() => {\n    if (!isPromptAutosaveReadyRef.current");
+    const autosave = appSource.slice(autosaveStart, appSource.indexOf("async function handleImport", autosaveStart));
+
+    expect(autosave).toContain("if (!tryBeginSessionMutation()) {");
+    expect(autosave).toContain("retryTimeout = window.setTimeout(attemptAutosave, 100)");
+    expect(autosave).toContain("void saveSessionPrompts(prompts)");
+    expect(autosave).toContain(".finally(() => {");
+    expect(autosave).toContain("endSessionMutation();");
+    expect(autosave).toContain("if (revision !== promptAutosaveRevisionRef.current) {");
   });
 
   it("supports batch local uploads and lets image generation create missing prompts", () => {
