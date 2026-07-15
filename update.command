@@ -21,15 +21,35 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Updating the project..."
-if ! git pull --ff-only; then
-  echo "Project update failed. Resolve any Git changes, then run update.command again."
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "Tracked local changes were found. Commit or discard them before running update.command."
+  read -r -p "Press Enter to close this window..." _
+  exit 1
+fi
+
+echo "Downloading the latest application release..."
+if ! git fetch --tags --force origin; then
+  echo "Could not download application releases from GitHub."
+  read -r -p "Press Enter to close this window..." _
+  exit 1
+fi
+
+release_tag="$(git tag --list "v[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)"
+if [ -z "$release_tag" ]; then
+  echo "No stable application release tag was found."
+  read -r -p "Press Enter to close this window..." _
+  exit 1
+fi
+
+echo "Installing application release $release_tag..."
+if ! git checkout --detach "$release_tag"; then
+  echo "Could not check out application release $release_tag."
   read -r -p "Press Enter to close this window..." _
   exit 1
 fi
 
 echo "Installing project dependencies..."
-if ! npm install; then
+if ! npm ci; then
   echo "Dependency installation failed."
   read -r -p "Press Enter to close this window..." _
   exit 1

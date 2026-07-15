@@ -23,16 +23,46 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo Updating the project...
-git pull --ff-only
+git diff --quiet
 if errorlevel 1 (
-  echo Project update failed. Resolve any Git changes, then run update.bat again.
+  echo Tracked local changes were found. Commit or discard them before running update.bat.
+  pause
+  exit /b 1
+)
+
+git diff --cached --quiet
+if errorlevel 1 (
+  echo Tracked local changes were found. Commit or discard them before running update.bat.
+  pause
+  exit /b 1
+)
+
+echo Downloading the latest application release...
+git fetch --tags --force origin
+if errorlevel 1 (
+  echo Could not download application releases from GitHub.
+  pause
+  exit /b 1
+)
+
+set "RELEASE_TAG="
+for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "git tag --list 'v*' --sort=-v:refname ^| Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } ^| Select-Object -First 1"`) do set "RELEASE_TAG=%%i"
+if not defined RELEASE_TAG (
+  echo No stable application release tag was found.
+  pause
+  exit /b 1
+)
+
+echo Installing application release %RELEASE_TAG%...
+git checkout --detach "%RELEASE_TAG%"
+if errorlevel 1 (
+  echo Could not check out application release %RELEASE_TAG%.
   pause
   exit /b 1
 )
 
 echo Installing project dependencies...
-call npm install
+call npm ci
 if errorlevel 1 (
   echo Dependency installation failed.
   pause
