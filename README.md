@@ -4,6 +4,22 @@ Local web studio for turning Instagram posts, Reels, and local image files into 
 
 It is designed for creators who need to revisit the same reference post without repeatedly downloading the same assets. Normal imports reuse healthy local media; use **Обновить заново** only when a fresh download is needed.
 
+## Install
+
+To give the app to another person, create a new empty folder and copy only the
+installer for their operating system into it. Then double-click the file:
+
+| System | File |
+| --- | --- |
+| Windows | `instal.bat` |
+| macOS | `instal.command` |
+
+The installer automatically installs Git and Node.js LTS, downloads the latest
+published application release into that same folder, installs its dependencies,
+and opens <http://localhost:5173>. On Windows it uses `winget`; on macOS it uses
+Homebrew and macOS can ask for an administrator password. Keep the terminal
+window open while using the application.
+
 ## Run
 
 Double-click the launcher for your operating system:
@@ -26,7 +42,10 @@ Double-click the updater for your operating system:
 | Windows | `update.bat` |
 | macOS | `update.command` |
 
-The updater safely downloads only fast-forward Git updates, installs the required npm dependencies, and starts the local studio. If Git needs manual attention or a prerequisite is missing, the terminal stays open with the error message.
+The updater downloads the latest published release tag in the `vX.Y.Z` format,
+installs the required npm dependencies, and starts the local studio. It stops
+before replacing any tracked local changes. If Git needs manual attention or a
+prerequisite is missing, the terminal stays open with the error message.
 
 You can also update from a terminal:
 
