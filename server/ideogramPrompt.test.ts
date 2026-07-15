@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildOllamaVisionRequest,
   defaultOllamaModel,
+  defaultPromptInstruction,
   ensureOllamaModel,
   generateIdeogramPromptForMedia
 } from "./ideogramPrompt";
@@ -12,6 +13,12 @@ import {
 describe("buildOllamaVisionRequest", () => {
   it("uses the configured Gemma model by default", () => {
     expect(defaultOllamaModel).toBe("fredrezones55/Gemma-4-Uncensored-HauhauCS-Aggressive:e4b");
+  });
+
+  it("exports the existing image-to-prompt instruction as the default editable instruction", () => {
+    expect(defaultPromptInstruction).toContain("Describe the attached image exactly as it is visible.");
+    expect(defaultPromptInstruction).toContain("Ideogram 4.0 structured JSON caption schema");
+    expect(defaultPromptInstruction).toContain("Return valid JSON only. No markdown, no comments, no explanations, no code fences.");
   });
 
   it("builds a vision request that asks Ollama for Ideogram JSON describing only the input image", () => {

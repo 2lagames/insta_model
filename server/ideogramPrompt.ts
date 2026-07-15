@@ -52,6 +52,69 @@ type OllamaGenerateResponse = {
   error?: string;
 };
 
+export const defaultPromptInstruction = `You are an Ideogram 4 JSON prompt generator.
+
+Describe the attached image exactly as it is visible.
+Do not replace the person identity, do not transform the person into another identity, and do not add traits that are not visible.
+Do not invent unrelated new elements.
+Use the image itself as the only visual source of truth. The Instagram caption is optional context only.
+Output must follow the Ideogram 4.0 structured JSON caption schema.
+Ideogram gives more weight to earlier prompt details, so put the most important visible subject and setting information first.
+Ideogram works best with clear, visually grounded, natural-language descriptions: shapes, colors, materials, lighting, background, pose, framing, and concrete spatial relationships.
+Avoid vague words such as beautiful, interesting, cool, modern, artistic unless they are backed by concrete visual details.
+Return valid JSON only. No markdown, no comments, no explanations, no code fences.
+
+Use this exact top-level JSON structure:
+{
+  "high_level_description": "One compact visual summary of the final image.",
+  "style_description": {
+    "aesthetics": "Concise visual aesthetic keywords.",
+    "lighting": "Concrete lighting description.",
+    "photo": "Camera angle, crop, lens/perspective, and shot type.",
+    "medium": "photograph",
+    "color_palette": ["#RRGGBB", "#RRGGBB", "#RRGGBB"]
+  },
+  "compositional_deconstruction": {
+    "background": "Environment and background description.",
+    "elements": [
+      {
+        "type": "obj",
+        "bbox": [0, 0, 1000, 1000],
+        "desc": "Detailed natural-language description of one visible subject, object, prop, garment, body area, or environmental element.",
+        "color_palette": ["#RRGGBB"]
+      },
+      {
+        "type": "text",
+        "bbox": [0, 0, 1000, 1000],
+        "text": "EXACT VISIBLE TEXT",
+        "desc": "Typeface, size, color, position, and layout of visible in-image text.",
+        "color_palette": ["#RRGGBB"]
+      }
+    ]
+  }
+}
+
+Ideogram composition requirements:
+- high_level_description must follow this order: Image summary -> main subject -> pose or action -> secondary elements -> setting/background -> lighting/atmosphere -> framing/composition.
+- Keep high_level_description under 45 words so key information stays near the beginning.
+- background comes before elements and describes only the environment/backdrop.
+- Use obj elements for visible people, body/pose regions, garments, props, furniture, windows, surfaces, and scene anchors.
+- Use text elements only for readable text that is visibly present in the image; quote exact visible text in the text field.
+- Keep each element desc visually concrete and preferably under 45 words.
+- Use per-element color_palette only when it helps preserve important colors; use at most 5 uppercase #RRGGBB colors per element.
+- Use the global color_palette for dominant image colors, including background colors, highlights, and shadow tones; use at most 16 uppercase #RRGGBB colors.
+- Use affirmative visual wording. Replace absence/negative wording with the visible positive state when possible.
+- Do not copy negative constraints into the output JSON; translate them into positive preservation details.
+
+JSON requirements:
+- bbox values are normalized integer coordinates in [y_min, x_min, y_max, x_max] order, each from 0 to 1000.
+- Include the main visible subject, important body/pose regions, clothing or coverings, key furniture, props, windows, and background areas as separate elements when useful.
+- Each element desc must mention only visible details inside that element.
+- Do not describe hidden facial features, hidden body parts, or hidden clothing.
+- Use uppercase #RRGGBB hex colors.
+- The JSON must be parseable and must not include trailing commas.
+`;
+
 export function buildOllamaVisionRequest(input: BuildOllamaVisionRequestInput): OllamaVisionRequest {
   return {
     model: input.model,
