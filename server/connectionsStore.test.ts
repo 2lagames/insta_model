@@ -165,6 +165,22 @@ describe("ConnectionsStore", () => {
     });
   });
 
+  it("persists generation prefix options and the selected option across a new store instance", async () => {
+    const store = new ConnectionsStore(tempDir);
+    const generationPrefixOptions = "Рекламный;commercial campaign\nКаталог;clean product catalog";
+
+    await store.save({
+      generationPrefixOptions,
+      generationPrefixSelection: "Каталог"
+    });
+
+    const reloadedStore = new ConnectionsStore(tempDir);
+    await expect(reloadedStore.readPublic()).resolves.toMatchObject({
+      generationPrefixOptions,
+      generationPrefixSelection: "Каталог"
+    });
+  });
+
   it("drops legacy RunningHub workflow JSON and file name during the next save", async () => {
     const store = new ConnectionsStore(tempDir);
     await store.save({ runningHubWorkflowId: "workflow-1" });
