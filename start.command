@@ -24,6 +24,12 @@ if [ ! -d "node_modules" ]; then
   fi
 fi
 
+if ! ./scripts/free-local-ports.sh; then
+  echo "Could not free the local application ports."
+  read -r -p "Press Enter to close this window..." _
+  exit 1
+fi
+
 echo "Starting the local project. Close this window to stop the server."
 npm run dev
 exit_code=$?

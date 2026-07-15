@@ -84,16 +84,22 @@ describe("Unix launcher port cleanup", () => {
 });
 
 describe("cross-platform launchers", () => {
-  it("keeps npm run dev in a visible terminal on both platforms", async () => {
-    const [windows, macos] = await Promise.all([
+  it("clears the local application ports before starting on every platform", async () => {
+    const [windows, macos, unix] = await Promise.all([
       readFile(join(projectRoot, "start.bat"), "utf8"),
-      readFile(join(projectRoot, "start.command"), "utf8")
+      readFile(join(projectRoot, "start.command"), "utf8"),
+      readFile(join(projectRoot, "start.sh"), "utf8")
     ]);
 
     expect(windows).toContain("call npm run dev");
     expect(macos).toContain("npm run dev");
-    expect(windows).not.toMatch(/taskkill|wmic|Stop-Process/i);
-    expect(macos).not.toMatch(/\bkill\b|pkill|lsof/i);
+    expect(macos).toContain("./scripts/free-local-ports.sh");
+    expect(unix).toContain("./scripts/free-local-ports.sh");
+    expect(windows).toContain("call :free_port 4317");
+    expect(windows).toContain("call :free_port 5173");
+    expect(windows).toContain("netstat -ano -p tcp");
+    expect(windows).toContain("taskkill /PID");
+    expect(windows).toContain("taskkill /F /PID");
   });
 
   it("checks prerequisites and installs dependencies only when needed", async () => {
