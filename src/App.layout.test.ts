@@ -46,6 +46,7 @@ describe("studio preview layout", () => {
     expect(cssSource).toContain("aspect-ratio: 9 / 16");
     expect(cssSource).toContain(".gallery-select");
     expect(cssSource).toContain(".media-selector");
+    expect(cssSource).toContain(".media-selector {\n  height: clamp(560px, 68vh, 780px);\n  min-width: 0;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;");
     expect(cssSource).toContain("grid-template-columns: auto minmax(110px, 150px) minmax(200px, 0.75fr) minmax(180px, 0.5fr)");
     expect(cssSource).toContain(".prompt-editors textarea");
     expect(cssSource).toContain("height: clamp(560px, 68vh, 780px)");
