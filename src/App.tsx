@@ -58,6 +58,7 @@ const emptyCurrentSession: CurrentMediaSession = {
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("studio");
   const [url, setUrl] = useState("");
+  const [urlNotice, setUrlNotice] = useState<string | null>(null);
   const [items, setItems] = useState<ImportItem[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
@@ -261,6 +262,7 @@ export default function App() {
           : "Import complete."
       });
       setUrl("");
+      setUrlNotice(null);
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
     } finally {
@@ -307,6 +309,7 @@ export default function App() {
       setSelectedForGeneration(importedMedia[0]?.id ? [importedMedia[0].id] : []);
       setPromptDocuments([]);
       setUrl("");
+      setUrlNotice("Локальное изображение — ссылка Instagram отсутствует");
       recordStatus({ tone: "ready", message: "Local image uploaded." });
     } catch (error) { recordStatus({ tone: "error", message: toErrorMessage(error) }); } finally { setIsImporting(false); }
   }
@@ -330,6 +333,8 @@ export default function App() {
       setIsMediaSessionReset(true);
       setSelectedForGeneration([]);
       setPromptDocuments([]);
+      setUrl("");
+      setUrlNotice(null);
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
     }
@@ -571,14 +576,17 @@ export default function App() {
           <section className="top-bar">
             <input
               className="url-input"
-              onChange={(event) => setUrl(event.target.value)}
+              onChange={(event) => {
+                setUrlNotice(null);
+                setUrl(event.target.value);
+              }}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !isImporting) {
                   void handleImport();
                 }
               }}
               placeholder="https://www.instagram.com/reel/..."
-              value={url}
+              value={urlNotice ?? url}
             />
             <button
               className="primary-button"

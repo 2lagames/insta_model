@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -72,6 +72,42 @@ describe("ImportStore", () => {
     await store.saveItem(sampleItem);
 
     await expect(store.listItems()).resolves.toEqual([sampleItem]);
+  });
+
+  it("clears prompt texts for a new session and keeps them when the session is extended", async () => {
+    const store = new ImportStore(tempDir);
+    await store.writeCurrentSession({
+      itemIds: ["old"],
+      sceneBibles: [],
+      mediaSceneMap: {},
+      promptTexts: { "old:image": "saved" }
+    });
+
+    await store.startCurrentSession("local-1");
+
+    const startedIndex = JSON.parse(await readFile(join(tempDir, "imports", "index.json"), "utf8"));
+    expect(startedIndex.currentSession).toEqual({
+      itemIds: ["local-1"],
+      sceneBibles: [],
+      mediaSceneMap: {},
+      promptTexts: {}
+    });
+
+    await store.writeCurrentSession({
+      itemIds: ["local-1"],
+      sceneBibles: [],
+      mediaSceneMap: {},
+      promptTexts: { "local-1:image": "final prompt" }
+    });
+    await store.appendToCurrentSession("generated-1");
+
+    await expect(store.readCurrentSession()).resolves.toMatchObject({
+      itemIds: ["local-1", "generated-1"],
+      promptTexts: { "local-1:image": "final prompt" }
+    });
+
+    await store.resetCurrentSession();
+    await expect(store.readCurrentSession()).resolves.toMatchObject({ promptTexts: {} });
   });
 
   it("finds the newest ready import for an Instagram URL", async () => {

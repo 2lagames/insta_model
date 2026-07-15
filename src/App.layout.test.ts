@@ -70,5 +70,6 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("onSave");
     expect(appSource).toContain(">Сохранить</button>");
     expect(appSource).toContain("Локальное изображение — ссылка Instagram отсутствует");
+    expect(appSource).toContain("urlNotice");
   });
 });

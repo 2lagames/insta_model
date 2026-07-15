@@ -131,7 +131,8 @@ export class ImportStore {
     const currentSession: CurrentMediaSession = {
       itemIds: [itemId],
       sceneBibles: sceneData?.sceneBibles ?? [],
-      mediaSceneMap: sceneData?.mediaSceneMap ?? {}
+      mediaSceneMap: sceneData?.mediaSceneMap ?? {},
+      promptTexts: {}
     };
     await this.writeIndex({
       ...index,
@@ -152,7 +153,8 @@ export class ImportStore {
       mediaSceneMap: {
         ...currentSession.mediaSceneMap,
         ...(sceneData?.mediaSceneMap ?? {})
-      }
+      },
+      promptTexts: currentSession.promptTexts ?? {}
     };
     await this.writeIndex({
       ...index,
