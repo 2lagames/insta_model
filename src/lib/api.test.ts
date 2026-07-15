@@ -9,6 +9,7 @@ import {
   listOllamaModels,
   listImports,
   resetMediaSession,
+  saveSessionPrompts,
   saveConnectionKey,
   uploadLocalImage
 } from "./api";
@@ -222,6 +223,21 @@ describe("imports session API", () => {
       mediaSceneMap: {}
     });
     expect(fetchSpy).toHaveBeenCalledWith("/api/imports/session/reset", { method: "POST" });
+  });
+
+  it("saves prompt texts to the current session", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      session: { itemIds: ["post-1"], sceneBibles: [], mediaSceneMap: {}, promptTexts: { "post-1:image": "saved" } }
+    })));
+
+    await expect(saveSessionPrompts({ "post-1:image": "saved" })).resolves.toMatchObject({
+      promptTexts: { "post-1:image": "saved" }
+    });
+    expect(fetchSpy).toHaveBeenCalledWith("/api/imports/session/prompts", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompts: { "post-1:image": "saved" } })
+    });
   });
 
   it("requests a fresh download only when force refresh is selected", async () => {

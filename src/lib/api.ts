@@ -279,6 +279,19 @@ export async function resetMediaSession(): Promise<CurrentMediaSession> {
   return data.session ?? createEmptySession(data.sessionItemIds ?? []);
 }
 
+export async function saveSessionPrompts(prompts: Record<string, string>): Promise<CurrentMediaSession> {
+  const response = await apiFetch("/api/imports/session/prompts", {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ prompts })
+  });
+  await assertOk(response);
+  const data = await response.json() as { session?: CurrentMediaSession };
+  return data.session ?? createEmptySession();
+}
+
 export async function generateImagePrompts(media: PromptMediaInput[]): Promise<PromptGenerationResult> {
   const response = await apiFetch("/api/generation/image-prompts", {
     method: "POST",

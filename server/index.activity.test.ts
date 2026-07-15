@@ -80,4 +80,12 @@ describe("image prompt activity", () => {
     expect(imageRoute).not.toContain("workflowJson");
     expect(imageRoute).toContain("imagePath: resolvePromptMediaImagePath(job.media.imagePath)");
   });
+
+  it("persists explicitly saved prompt text in the current session", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+
+    expect(source).toContain('app.put("/api/imports/session/prompts"');
+    expect(source).toContain("parsePromptTexts(request.body?.prompts)");
+    expect(source).toContain("promptTexts: { ...(currentSession.promptTexts ?? {}), ...prompts }");
+  });
 });

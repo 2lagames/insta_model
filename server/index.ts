@@ -225,6 +225,21 @@ app.post("/api/imports/session/reset", async (_request, response) => {
   }
 });
 
+app.put("/api/imports/session/prompts", async (request, response) => {
+  try {
+    const prompts = parsePromptTexts(request.body?.prompts);
+    const currentSession = await store.readCurrentSession();
+    const session = {
+      ...currentSession,
+      promptTexts: { ...(currentSession.promptTexts ?? {}), ...prompts }
+    };
+    await store.writeCurrentSession(session);
+    response.json({ session });
+  } catch (error) {
+    response.status(400).json({ error: toErrorMessage(error) });
+  }
+});
+
 app.post("/api/imports/check", async (request, response) => {
   const url = String(request.body?.url ?? "");
   const validation = validateInstagramUrl(url);
@@ -459,6 +474,21 @@ function parsePromptMedia(value: unknown): PromptMediaInput[] {
 
     return { id, label, imagePath, sourceKind, caption };
   });
+}
+
+function parsePromptTexts(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("prompts must be an object with string values.");
+  }
+
+  const prompts: Record<string, string> = {};
+  for (const [mediaId, prompt] of Object.entries(value)) {
+    if (typeof prompt !== "string") {
+      throw new Error("prompts must be an object with string values.");
+    }
+    prompts[mediaId] = prompt;
+  }
+  return prompts;
 }
 
 function parseRunningHubPromptJobs(value: unknown): Array<{ media: PromptMediaInput; prompt: string }> {
