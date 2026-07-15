@@ -582,7 +582,6 @@ export default function App() {
 
           <section className="workspace">
             <section className="preview-panel">
-              <div className="panel-label">Preview</div>
               <Preview
                 generationPrefixOptions={generationPrefixOptions}
                 generationPrefixSelection={generationPrefixSelection}
@@ -770,6 +769,7 @@ function Preview({
 
   return (
     <div className="preview-content">
+      <div className="preview-label-row"><div className="panel-label">Preview</div><div className="panel-label">Media</div><div className="panel-label">Info</div><div className="panel-label">Generation workspace</div></div>
       <div className="preview-main">
         <div className="media-stage">
           {selected.files.video ? (
@@ -869,7 +869,6 @@ function GenerationWorkspace({
 
   return (
     <aside className="generation-panel">
-      <div className="panel-label">Generation workspace</div>
       <div className="generation-prefix-control"><select onChange={(event) => onChangePrefix(event.target.value)} value={generationPrefixSelection}><option value="">Не выбрано</option>{parseGenerationPrefixes(generationPrefixOptions).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select><button aria-label="Редактировать варианты промта" onClick={onEditPrefixes} type="button">✎</button></div>
       <button
         disabled={isBusy || selectedForGenerationCount === 0}
@@ -907,7 +906,6 @@ function MediaSelector({
 }) {
   return (
     <aside className="media-selector">
-      <div className="panel-label">Media</div>
       {materials.map((material) => (
         <div className={["gallery-item", material.id === selected?.id ? "selected" : "", selectedForGeneration.includes(material.id) ? "queued" : ""].filter(Boolean).join(" ")} key={material.id}>
           <button className="gallery-preview" onClick={() => onSelect(material)} type="button">

@@ -173,6 +173,16 @@ input {
   flex: 1;
 }
 
+.preview-label-row {
+  display: grid;
+  grid-template-columns: auto minmax(110px, 150px) minmax(200px, 0.75fr) minmax(180px, 0.5fr);
+  gap: 14px;
+}
+
+.preview-label-row .panel-label {
+  margin-bottom: 10px;
+}
+
 .preview-main {
   min-height: 0;
   display: grid;
@@ -340,6 +350,25 @@ input {
   gap: 10px;
   padding: 14px;
 }
+
+.generation-prefix-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 8px;
+}
+
+.generation-prefix-control select,
+.generation-prefix-control button {
+  height: 42px;
+  border: 1px solid #2c2a26;
+  border-radius: 8px;
+  background: #fffdf8;
+  color: #1d1c1a;
+  font: inherit;
+}
+
+.generation-prefix-control select { padding: 0 12px; }
+.generation-prefix-control button { padding: 0; cursor: pointer; font-size: 20px; }
 
 .generation-panel .panel-label {
   grid-column: 1 / -1;
@@ -714,6 +743,8 @@ input {
   .connections-grid {
     grid-template-columns: 1fr;
   }
+
+  .preview-label-row { grid-template-columns: 1fr; }
 
   .top-bar {
     flex-direction: column;
