@@ -1,21 +1,35 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   checkInstagramUrl,
+  clearConnectionKey,
   generateImagePrompts,
   generateImages,
+  getConnectionKey,
   getConnections,
   getHealth,
   importInstagramUrl,
   listImports,
+  listOllamaModels,
   openImportsFolder,
   resetMediaSession,
+  saveConnectionKey,
   saveConnections,
+  type ConnectionKeyName,
   type PublicConnections
 } from "./lib/api";
 import type { CurrentMediaSession, ImportItem, SceneBible } from "./lib/importTypes";
 import { validateInstagramUrl } from "./lib/instagramUrl";
 import { createMediaMaterials, createSessionMediaMaterials, type MediaMaterial } from "./lib/mediaMaterials";
 import { toggleMediaSelection } from "./lib/mediaSelection";
+import {
+  createPromptDocuments,
+  editPromptDocument,
+  getCurrentPrompt,
+  redoPromptDocument,
+  resetPromptDocument,
+  undoPromptDocument,
+  type PromptDocument
+} from "./lib/promptDocuments";
 import type { PromptMediaInput } from "./lib/promptTypes";
 import { createStatusLogText } from "./lib/statusLog";
 
@@ -68,14 +82,24 @@ export default function App() {
     hasRunningHubApiKey: false,
     hasRunningHubWorkflow: false
   });
-  const [scrapeCreatorsApiKey, setScrapeCreatorsApiKey] = useState("");
-  const [runningHubApiKey, setRunningHubApiKey] = useState("");
+  const [editingKey, setEditingKey] = useState<ConnectionKeyName | null>(null);
+  const [editingKeyValue, setEditingKeyValue] = useState("");
+  const [isLoadingKey, setIsLoadingKey] = useState(false);
   const [runningHubWorkflowId, setRunningHubWorkflowId] = useState("");
   const [runningHubPromptNodeId, setRunningHubPromptNodeId] = useState("");
   const [runningHubPromptFieldName, setRunningHubPromptFieldName] = useState("text");
-  const [runningHubWorkflowFileName, setRunningHubWorkflowFileName] = useState("");
-  const [runningHubWorkflowJson, setRunningHubWorkflowJson] = useState("");
+  const [runningHubImageNodeId, setRunningHubImageNodeId] = useState("");
+  const [runningHubImageFieldName, setRunningHubImageFieldName] = useState("image");
+  const [ollamaProvider, setOllamaProvider] = useState<"cloud" | "local">("local");
+  const [ollamaCloudModel, setOllamaCloudModel] = useState("");
+  const [ollamaLocalModel, setOllamaLocalModel] = useState("");
+  const [ollamaPromptInstruction, setOllamaPromptInstruction] = useState("");
+  const [cloudModels, setCloudModels] = useState<string[]>([]);
+  const [localModels, setLocalModels] = useState<string[]>([]);
+  const [isRefreshingCloudModels, setIsRefreshingCloudModels] = useState(false);
+  const [isRefreshingLocalModels, setIsRefreshingLocalModels] = useState(false);
   const [isSavingConnections, setIsSavingConnections] = useState(false);
+  const [promptDocuments, setPromptDocuments] = useState<PromptDocument[]>([]);
 
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedItemId) ?? (isMediaSessionReset ? undefined : items[0]),
@@ -168,16 +192,24 @@ export default function App() {
     getConnections()
       .then((loadedConnections) => {
         setConnections(loadedConnections);
-        setScrapeCreatorsApiKey(loadedConnections.scrapeCreatorsApiKeyPreview ?? "");
-        setRunningHubApiKey(loadedConnections.runningHubApiKeyPreview ?? "");
         setRunningHubWorkflowId(loadedConnections.runningHubWorkflowId ?? "");
         setRunningHubPromptNodeId(loadedConnections.runningHubPromptNodeId ?? "");
         setRunningHubPromptFieldName(loadedConnections.runningHubPromptFieldName ?? "text");
-        setRunningHubWorkflowFileName(loadedConnections.runningHubWorkflowFileName ?? "");
+        setRunningHubImageNodeId(loadedConnections.runningHubImageNodeId ?? "");
+        setRunningHubImageFieldName(loadedConnections.runningHubImageFieldName ?? "image");
+        setOllamaProvider(loadedConnections.ollamaProvider ?? "local");
+        setOllamaCloudModel(loadedConnections.ollamaCloudModel ?? "");
+        setOllamaLocalModel(loadedConnections.ollamaLocalModel ?? "");
+        setOllamaPromptInstruction(loadedConnections.ollamaPromptInstruction ?? "");
+        if (loadedConnections.hasOllamaCloudApiKey) {
+          void refreshOllamaModels("cloud", true);
+        }
       })
       .catch((error: unknown) => {
         recordStatus({ tone: "error", message: toErrorMessage(error) });
       });
+
+    void refreshOllamaModels("local", true);
   }, []);
 
   async function handleImport(forceRefresh = false) {
@@ -272,6 +304,7 @@ export default function App() {
       setSelectedMediaId(null);
       setIsMediaSessionReset(true);
       setSelectedForGeneration([]);
+      setPromptDocuments([]);
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
     }
@@ -286,9 +319,17 @@ export default function App() {
     }
 
     setIsGeneratingPrompt(true);
-    recordStatus({ tone: "running", message: "Generating Ideogram JSON prompt with local Ollama." });
+    recordStatus({ tone: "running", message: "Generating prompts with the selected Ollama model." });
     try {
+      const savedConnections = await saveConnections({
+        ollamaProvider,
+        ollamaCloudModel,
+        ollamaLocalModel,
+        ollamaPromptInstruction
+      });
+      setConnections(savedConnections);
       const generated = await generateImagePrompts(selectedPromptMedia);
+      setPromptDocuments(createPromptDocuments(generated.prompts));
       setCurrentSession(generated.session);
       setSessionMediaItemIds(generated.session.itemIds);
       setIsMediaSessionReset(false);
@@ -300,26 +341,32 @@ export default function App() {
   }
 
   async function handleGenerateImages() {
-    const selectedPromptMedia = mediaMaterials
-      .filter((material) => selectedForGeneration.includes(material.id))
-      .map((material) => createPromptMediaInput(material, currentSession))
-      .filter((material): material is PromptMediaInput => Boolean(material));
+    const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
+    const promptByMediaId = new Map(promptDocuments.map((document) => [document.mediaId, document]));
+    const imageJobs = selectedPromptMedia.map((media) => {
+      const document = promptByMediaId.get(media.id);
+      return document ? { media, prompt: getCurrentPrompt(document) } : undefined;
+    }).filter((job): job is { media: PromptMediaInput; prompt: string } => Boolean(job));
 
     if (selectedPromptMedia.length === 0) {
       recordStatus({ tone: "error", message: "Select one or more Media items before image generation." });
       return;
     }
 
+    if (imageJobs.length !== selectedPromptMedia.length) {
+      recordStatus({ tone: "error", message: "Generate a prompt for every selected Media item before image generation." });
+      return;
+    }
+
     setIsGeneratingImages(true);
-    recordStatus({ tone: "running", message: "Generating Ideogram JSON prompt with local Ollama, then sending it to RunningHub." });
+    recordStatus({ tone: "running", message: "Sending the current edited prompts and source images to RunningHub." });
     try {
-      const generated = await generateImages(selectedPromptMedia);
+      const generated = await generateImages(imageJobs);
       setItems((current) => [generated.item, ...current.filter((item) => item.id !== generated.item.id)]);
       const generatedMedia = createMediaMaterials(generated.item);
       setCurrentSession(generated.session);
       setSessionMediaItemIds(generated.session.itemIds);
       setIsMediaSessionReset(false);
-      setSelectedMediaId(generatedMedia[0]?.id ?? null);
       setSelectedForGeneration((current) => current.filter((id) => !generatedMedia.some((material) => material.id === id)));
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
@@ -343,22 +390,22 @@ export default function App() {
     setIsSavingConnections(true);
     try {
       const saved = await saveConnections({
-        scrapeCreatorsApiKey,
-        runningHubApiKey,
+        ollamaProvider,
+        ollamaCloudModel,
+        ollamaLocalModel,
+        ollamaPromptInstruction,
         runningHubWorkflowId,
         runningHubPromptNodeId,
         runningHubPromptFieldName,
-        runningHubWorkflowFileName,
-        runningHubWorkflowJson
+        runningHubImageNodeId,
+        runningHubImageFieldName
       });
       setConnections(saved);
-      setScrapeCreatorsApiKey(saved.scrapeCreatorsApiKeyPreview ?? "");
-      setRunningHubApiKey(saved.runningHubApiKeyPreview ?? "");
       setRunningHubWorkflowId(saved.runningHubWorkflowId ?? "");
       setRunningHubPromptNodeId(saved.runningHubPromptNodeId ?? "");
       setRunningHubPromptFieldName(saved.runningHubPromptFieldName ?? "text");
-      setRunningHubWorkflowFileName(saved.runningHubWorkflowFileName ?? "");
-      setRunningHubWorkflowJson("");
+      setRunningHubImageNodeId(saved.runningHubImageNodeId ?? "");
+      setRunningHubImageFieldName(saved.runningHubImageFieldName ?? "image");
       recordStatus({ tone: "ready", message: "Connections saved locally." });
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
@@ -367,19 +414,79 @@ export default function App() {
     }
   }
 
-  async function handleRunningHubWorkflowFile(file: File | undefined) {
-    if (!file) {
+  async function handleEditKey(keyName: ConnectionKeyName) {
+    setIsLoadingKey(true);
+    try {
+      setEditingKeyValue(await getConnectionKey(keyName));
+      setEditingKey(keyName);
+    } catch (error) {
+      recordStatus({ tone: "error", message: toErrorMessage(error) });
+    } finally {
+      setIsLoadingKey(false);
+    }
+  }
+
+  async function handleSaveKey(value: string) {
+    if (!editingKey) {
       return;
     }
 
     try {
-      const text = await file.text();
-      JSON.parse(text);
-      setRunningHubWorkflowFileName(file.name);
-      setRunningHubWorkflowJson(text);
-      recordStatus({ tone: "ready", message: `RunningHub workflow selected: ${file.name}` });
-    } catch {
-      recordStatus({ tone: "error", message: "RunningHub workflow file must be valid JSON." });
+      await saveConnectionKey(editingKey, value);
+      const saved = await getConnections();
+      setConnections(saved);
+      setEditingKey(null);
+      if (editingKey === "ollamaCloudApiKey" && value.trim()) {
+        await refreshOllamaModels("cloud");
+      }
+      recordStatus({ tone: "ready", message: "API key saved locally." });
+    } catch (error) {
+      recordStatus({ tone: "error", message: toErrorMessage(error) });
+    }
+  }
+
+  async function handleClearKey(keyName: ConnectionKeyName) {
+    try {
+      await clearConnectionKey(keyName);
+      const saved = await getConnections();
+      setConnections(saved);
+      if (keyName === "ollamaCloudApiKey") {
+        setCloudModels([]);
+      }
+      recordStatus({ tone: "ready", message: "API key cleared locally." });
+    } catch (error) {
+      recordStatus({ tone: "error", message: toErrorMessage(error) });
+    }
+  }
+
+  async function refreshOllamaModels(provider: "cloud" | "local", silently = false) {
+    if (provider === "cloud") {
+      setIsRefreshingCloudModels(true);
+    } else {
+      setIsRefreshingLocalModels(true);
+    }
+
+    try {
+      const models = await listOllamaModels(provider);
+      const names = models.map((model) => model.name);
+      if (provider === "cloud") {
+        setCloudModels(names);
+      } else {
+        setLocalModels(names);
+      }
+      if (!silently) {
+        recordStatus({ tone: "ready", message: `Updated ${provider === "cloud" ? "Ollama Cloud" : "local Ollama"} model list.` });
+      }
+    } catch (error) {
+      if (!silently) {
+        recordStatus({ tone: "error", message: toErrorMessage(error) });
+      }
+    } finally {
+      if (provider === "cloud") {
+        setIsRefreshingCloudModels(false);
+      } else {
+        setIsRefreshingLocalModels(false);
+      }
     }
   }
 
@@ -456,51 +563,19 @@ export default function App() {
                 isGeneratingImages={isGeneratingImages}
                 onGenerateImages={handleGenerateImages}
                 onGenerateImagePrompts={handleGenerateImagePrompts}
+                onSelectMaterial={(material) => {
+                  setSelectedItemId(material.importItem.id);
+                  setSelectedMediaId(material.id);
+                }}
+                onToggleMaterial={(materialId) => setSelectedForGeneration((current) => toggleMediaSelection(current, materialId))}
+                promptDocuments={promptDocuments}
+                selectedForGeneration={selectedForGeneration}
+                materials={mediaMaterials}
                 selected={selectedMedia}
                 selectedForGenerationCount={selectedForGeneration.length}
+                setPromptDocuments={setPromptDocuments}
               />
             </section>
-          </section>
-
-          <section className="bottom-gallery">
-            <div className="panel-label">Media</div>
-            <div className="gallery-strip">
-              {mediaMaterials.length === 0 ? (
-                <span>Current import media will appear here.</span>
-              ) : (
-                mediaMaterials.map((material) => (
-                  <div
-                    className={[
-                      "gallery-item",
-                      material.id === selectedMedia?.id ? "selected" : "",
-                      selectedForGeneration.includes(material.id) ? "queued" : ""
-                    ].filter(Boolean).join(" ")}
-                    key={material.id}
-                  >
-                    <button
-                      className="gallery-preview"
-                      onClick={() => {
-                        setSelectedItemId(material.importItem.id);
-                        setSelectedMediaId(material.id);
-                      }}
-                      type="button"
-                    >
-                      <GalleryThumb material={material} />
-                      <span>{material.label}</span>
-                      <span className="gallery-scene-label">{getSceneForMaterial(material, currentSession)?.name ?? "No scene"}</span>
-                    </button>
-                    <label className="gallery-select">
-                      <input
-                        checked={selectedForGeneration.includes(material.id)}
-                        onChange={() => setSelectedForGeneration((current) => toggleMediaSelection(current, material.id))}
-                        type="checkbox"
-                      />
-                      Use
-                    </label>
-                  </div>
-                ))
-              )}
-            </div>
           </section>
 
           <LogPanel
@@ -516,54 +591,54 @@ export default function App() {
           <div className="connection-card">
             <div>
               <h2>ScrapeCreators</h2>
-              <p>
-                {connections.hasScrapeCreatorsApiKey
-                  ? `Ключ сохранен локально: ${connections.scrapeCreatorsApiKeyPreview}`
-                  : "Ключ не сохранен."}
-              </p>
+              <KeyStatus hasKey={connections.hasScrapeCreatorsApiKey} preview={connections.scrapeCreatorsApiKeyPreview} />
             </div>
-            <input
-              className="secret-input"
-              onFocus={() => {
-                if (connections.scrapeCreatorsApiKeyPreview && scrapeCreatorsApiKey === connections.scrapeCreatorsApiKeyPreview) {
-                  setScrapeCreatorsApiKey("");
-                }
-              }}
-              onChange={(event) => setScrapeCreatorsApiKey(event.target.value)}
-              placeholder="Вставь новый API key"
-              type={scrapeCreatorsApiKey === connections.scrapeCreatorsApiKeyPreview ? "text" : "password"}
-              value={scrapeCreatorsApiKey}
-            />
+            <KeyActions disabled={isLoadingKey} onClear={() => void handleClearKey("scrapeCreatorsApiKey")} onEdit={() => void handleEditKey("scrapeCreatorsApiKey")} />
+          </div>
+          <div className="connection-card ollama-card">
+            <div>
+              <h2>Ollama</h2>
+              <div className="provider-toggle" role="group" aria-label="Источник Ollama">
+                <button className={ollamaProvider === "cloud" ? "active" : ""} onClick={() => setOllamaProvider("cloud")} type="button">Ollama Cloud</button>
+                <button className={ollamaProvider === "local" ? "active" : ""} onClick={() => setOllamaProvider("local")} type="button">Локальная Ollama</button>
+              </div>
+              <KeyStatus hasKey={connections.hasOllamaCloudApiKey === true} preview={connections.ollamaCloudApiKeyPreview} />
+            </div>
+            <div className="connections-grid">
+              <div className="key-actions"><KeyActions disabled={isLoadingKey} onClear={() => void handleClearKey("ollamaCloudApiKey")} onEdit={() => void handleEditKey("ollamaCloudApiKey")} /></div>
+              <label>
+                <span>Cloud model</span>
+                <div className="model-control">
+                  <select disabled={!connections.hasOllamaCloudApiKey} onChange={(event) => setOllamaCloudModel(event.target.value)} value={ollamaCloudModel}>
+                    <option value="">Выберите модель</option>
+                    {cloudModels.map((model) => <option key={model} value={model}>{model}</option>)}
+                  </select>
+                  <button aria-label="Обновить модели Ollama Cloud" disabled={!connections.hasOllamaCloudApiKey || isRefreshingCloudModels} onClick={() => void refreshOllamaModels("cloud")} type="button">↻</button>
+                </div>
+              </label>
+              <label>
+                <span>Local model</span>
+                <div className="model-control">
+                  <select onChange={(event) => setOllamaLocalModel(event.target.value)} value={ollamaLocalModel}>
+                    <option value="">Выберите модель</option>
+                    {localModels.map((model) => <option key={model} value={model}>{model}</option>)}
+                  </select>
+                  <button aria-label="Обновить модели локальной Ollama" disabled={isRefreshingLocalModels} onClick={() => void refreshOllamaModels("local")} type="button">↻</button>
+                </div>
+              </label>
+              <label className="instruction-control">
+                <span>Промт для генерации</span>
+                <textarea onChange={(event) => setOllamaPromptInstruction(event.target.value)} placeholder="Инструкция для генерации промта" rows={8} value={ollamaPromptInstruction} />
+              </label>
+            </div>
           </div>
           <div className="connection-card runninghub-card">
             <div>
               <h2>RunningHub ComfyUI</h2>
-              <p>
-                {connections.hasRunningHubApiKey
-                  ? `Ключ сохранен локально: ${connections.runningHubApiKeyPreview}`
-                  : "Ключ не сохранен."}
-                {" "}
-                {connections.hasRunningHubWorkflow
-                  ? `Workflow: ${connections.runningHubWorkflowFileName ?? "saved JSON"}`
-                  : "Workflow JSON не выбран."}
-              </p>
+              <KeyStatus hasKey={connections.hasRunningHubApiKey} preview={connections.runningHubApiKeyPreview} />
             </div>
+            <KeyActions disabled={isLoadingKey} onClear={() => void handleClearKey("runningHubApiKey")} onEdit={() => void handleEditKey("runningHubApiKey")} />
             <div className="connections-grid">
-              <label>
-                <span>API key</span>
-                <input
-                  className="secret-input"
-                  onFocus={() => {
-                    if (connections.runningHubApiKeyPreview && runningHubApiKey === connections.runningHubApiKeyPreview) {
-                      setRunningHubApiKey("");
-                    }
-                  }}
-                  onChange={(event) => setRunningHubApiKey(event.target.value)}
-                  placeholder="RunningHub API key"
-                  type={runningHubApiKey === connections.runningHubApiKeyPreview ? "text" : "password"}
-                  value={runningHubApiKey}
-                />
-              </label>
               <label>
                 <span>Workflow ID</span>
                 <input
@@ -591,15 +666,15 @@ export default function App() {
                   value={runningHubPromptFieldName}
                 />
               </label>
+              <label>
+                <span>Image node ID</span>
+                <input className="secret-input" onChange={(event) => setRunningHubImageNodeId(event.target.value)} placeholder="39" value={runningHubImageNodeId} />
+              </label>
+              <label>
+                <span>Image field</span>
+                <input className="secret-input" onChange={(event) => setRunningHubImageFieldName(event.target.value)} placeholder="image" value={runningHubImageFieldName} />
+              </label>
             </div>
-            <label className="workflow-file-control">
-              <span>{runningHubWorkflowFileName || "Выбрать workflow JSON"}</span>
-              <input
-                accept=".json,application/json"
-                onChange={(event) => void handleRunningHubWorkflowFile(event.target.files?.[0])}
-                type="file"
-              />
-            </label>
           </div>
           <button
             className="primary-button save-connections-button"
@@ -612,6 +687,7 @@ export default function App() {
           <div className="connection-note">
             Ключ хранится в локальном файле data/connections.local.json. Этот путь добавлен в .gitignore.
           </div>
+          {editingKey ? <KeyEditDialog integration={getIntegrationName(editingKey)} onClose={() => setEditingKey(null)} onSave={handleSaveKey} savedValue={editingKeyValue} /> : null}
         </section>
       )}
     </main>
@@ -623,15 +699,27 @@ function Preview({
   isGeneratingImages,
   onGenerateImages,
   onGenerateImagePrompts,
+  onSelectMaterial,
+  onToggleMaterial,
+  promptDocuments,
+  selectedForGeneration,
   selectedForGenerationCount,
-  selected
+  selected,
+  materials,
+  setPromptDocuments
 }: {
   isGeneratingPrompt: boolean;
   isGeneratingImages: boolean;
   onGenerateImages: () => void;
   onGenerateImagePrompts: () => void;
+  onSelectMaterial: (material: MediaMaterial) => void;
+  onToggleMaterial: (materialId: string) => void;
+  promptDocuments: PromptDocument[];
+  selectedForGeneration: string[];
   selectedForGenerationCount: number;
   selected?: MediaMaterial;
+  materials: MediaMaterial[];
+  setPromptDocuments: React.Dispatch<React.SetStateAction<PromptDocument[]>>;
 }) {
   if (!selected) {
     return <div className="preview-empty">Import an Instagram post or reel to preview media here.</div>;
@@ -652,8 +740,8 @@ function Preview({
             <div className="preview-empty">No preview file was generated for this import.</div>
           )}
         </div>
-        <div className="preview-side">
-          <aside className="preview-details">
+        <MediaSelector materials={materials} onSelect={onSelectMaterial} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
+        <aside className="preview-details">
             <section className="caption-panel">
               <div className="panel-label">Text</div>
               <div className="caption-text">{importItem.caption || "No caption text returned for this media."}</div>
@@ -680,16 +768,24 @@ function Preview({
                 <dd><a href={importItem.sourceUrl} rel="noreferrer" target="_blank">Open Instagram link</a></dd>
               </div>
             </dl>
-          </aside>
-          <GenerationWorkspace
-            isGeneratingImages={isGeneratingImages}
-            isGeneratingPrompt={isGeneratingPrompt}
-            onGenerateImages={onGenerateImages}
-            onGenerateImagePrompts={onGenerateImagePrompts}
-            selectedForGenerationCount={selectedForGenerationCount}
-          />
-        </div>
+        </aside>
+        <GenerationWorkspace
+          hasPromptsForEverySelected={selectedForGeneration.every((mediaId) => promptDocuments.some((document) => document.mediaId === mediaId))}
+          isGeneratingImages={isGeneratingImages}
+          isGeneratingPrompt={isGeneratingPrompt}
+          onGenerateImages={onGenerateImages}
+          onGenerateImagePrompts={onGenerateImagePrompts}
+          selectedForGenerationCount={selectedForGenerationCount}
+        />
       </div>
+      <PromptEditors
+        documents={promptDocuments.filter((document) => selectedForGeneration.includes(document.mediaId))}
+        materials={materials.filter((material) => selectedForGeneration.includes(material.id))}
+        onEdit={(mediaId, value) => setPromptDocuments((current) => editPromptDocument(current, mediaId, value))}
+        onRedo={(mediaId) => setPromptDocuments((current) => redoPromptDocument(current, mediaId))}
+        onReset={(mediaId) => setPromptDocuments((current) => resetPromptDocument(current, mediaId))}
+        onUndo={(mediaId) => setPromptDocuments((current) => undoPromptDocument(current, mediaId))}
+      />
     </div>
   );
 }
@@ -699,12 +795,14 @@ function GenerationWorkspace({
   isGeneratingPrompt,
   onGenerateImages,
   onGenerateImagePrompts,
+  hasPromptsForEverySelected,
   selectedForGenerationCount
 }: {
   isGeneratingImages: boolean;
   isGeneratingPrompt: boolean;
   onGenerateImages: () => void;
   onGenerateImagePrompts: () => void;
+  hasPromptsForEverySelected: boolean;
   selectedForGenerationCount: number;
 }) {
   const isBusy = isGeneratingPrompt || isGeneratingImages;
@@ -720,7 +818,7 @@ function GenerationWorkspace({
         {isGeneratingPrompt ? "Generating" : `Generate prompt (${selectedForGenerationCount})`}
       </button>
       <button
-        disabled={isBusy || selectedForGenerationCount === 0}
+        disabled={isBusy || selectedForGenerationCount === 0 || !hasPromptsForEverySelected}
         onClick={onGenerateImages}
         type="button"
       >
@@ -731,6 +829,120 @@ function GenerationWorkspace({
       <button disabled type="button">Caption and hashtags</button>
     </aside>
   );
+}
+
+function MediaSelector({
+  materials,
+  onSelect,
+  onToggle,
+  selected,
+  selectedForGeneration
+}: {
+  materials: MediaMaterial[];
+  onSelect: (material: MediaMaterial) => void;
+  onToggle: (materialId: string) => void;
+  selected?: MediaMaterial;
+  selectedForGeneration: string[];
+}) {
+  return (
+    <aside className="media-selector">
+      <div className="panel-label">Media</div>
+      {materials.map((material) => (
+        <div className={["gallery-item", material.id === selected?.id ? "selected" : "", selectedForGeneration.includes(material.id) ? "queued" : ""].filter(Boolean).join(" ")} key={material.id}>
+          <button className="gallery-preview" onClick={() => onSelect(material)} type="button">
+            <GalleryThumb material={material} />
+            <span>{material.label}</span>
+          </button>
+          <label className="gallery-select">
+            <input checked={selectedForGeneration.includes(material.id)} onChange={() => onToggle(material.id)} type="checkbox" />
+            Use
+          </label>
+        </div>
+      ))}
+    </aside>
+  );
+}
+
+function PromptEditors({
+  documents,
+  materials,
+  onEdit,
+  onRedo,
+  onReset,
+  onUndo
+}: {
+  documents: PromptDocument[];
+  materials: MediaMaterial[];
+  onEdit: (mediaId: string, value: string) => void;
+  onRedo: (mediaId: string) => void;
+  onReset: (mediaId: string) => void;
+  onUndo: (mediaId: string) => void;
+}) {
+  const materialById = new Map(materials.map((material) => [material.id, material]));
+
+  if (documents.length === 0) {
+    return <section className="prompt-editors prompt-editors-empty">Сгенерированные промты для выбранных Media появятся здесь.</section>;
+  }
+
+  return (
+    <section className="prompt-editors" aria-label="Сгенерированные промты">
+      {documents.map((document) => (
+        <article className="prompt-editor-card" key={document.mediaId}>
+          <div className="prompt-editor-header">
+            <strong>Промт: {materialById.get(document.mediaId)?.label ?? document.label}</strong>
+            <div className="prompt-editor-actions">
+              <button aria-label="Отменить изменение промта" disabled={document.historyIndex === 0} onClick={() => onUndo(document.mediaId)} type="button">↶</button>
+              <button aria-label="Повторить изменение промта" disabled={document.historyIndex === document.history.length - 1} onClick={() => onRedo(document.mediaId)} type="button">↷</button>
+              <button aria-label="Сбросить изменения промта" onClick={() => onReset(document.mediaId)} type="button">↺</button>
+            </div>
+          </div>
+          <textarea rows={20} value={getCurrentPrompt(document)} onChange={(event) => onEdit(document.mediaId, event.target.value)} />
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function KeyStatus({ hasKey, preview }: { hasKey: boolean; preview?: string }) {
+  return <p>{hasKey ? `Ключ сохранен локально: ${preview}` : "Ключ не сохранен."}</p>;
+}
+
+function KeyActions({ disabled, onClear, onEdit }: { disabled: boolean; onClear: () => void; onEdit: () => void }) {
+  return <div className="key-actions"><button disabled={disabled} onClick={onEdit} type="button">Вставить ключ</button><button disabled={disabled} onClick={onClear} type="button">Очистить</button></div>;
+}
+
+function KeyEditDialog({
+  integration,
+  savedValue,
+  onSave,
+  onClose
+}: {
+  integration: string;
+  savedValue: string;
+  onSave: (value: string) => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(savedValue);
+
+  return (
+    <div className="key-dialog-backdrop" role="presentation">
+      <section aria-label={`API key: ${integration}`} className="key-dialog" role="dialog" aria-modal="true">
+        <h2>{integration}: API key</h2>
+        <input autoFocus onChange={(event) => setValue(event.target.value)} type="text" value={value} />
+        <div className="key-actions"><button onClick={() => onSave(value)} type="button">Сохранить</button><button onClick={onClose} type="button">Отмена</button></div>
+      </section>
+    </div>
+  );
+}
+
+function getIntegrationName(keyName: ConnectionKeyName): string {
+  if (keyName === "scrapeCreatorsApiKey") {
+    return "ScrapeCreators";
+  }
+  if (keyName === "ollamaCloudApiKey") {
+    return "Ollama Cloud";
+  }
+  return "RunningHub";
 }
 
 function LogPanel({
