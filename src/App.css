@@ -216,7 +216,13 @@ input {
   min-width: 0;
   display: grid;
   grid-template-rows: auto auto;
-  gap: 12px;
+  gap: 0;
+}
+
+.preview-details > .panel-label,
+.media-selector > .panel-label,
+.generation-column > .panel-label {
+  margin-bottom: 10px;
 }
 
 .metadata-grid {
@@ -351,6 +357,14 @@ input {
   padding: 14px;
 }
 
+.generation-column {
+  min-width: 0;
+}
+
+.generation-column .generation-panel {
+  min-height: 0;
+}
+
 .generation-prefix-control {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px;
@@ -385,7 +399,7 @@ input {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   overflow-y: auto;
   padding-right: 4px;
 }

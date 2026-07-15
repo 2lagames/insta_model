@@ -870,7 +870,7 @@ function GenerationWorkspace({
   const isBusy = isGeneratingPrompt || isGeneratingImages;
 
   return (
-    <aside className="generation-panel">
+    <div className="generation-column"><div className="panel-label">Generation workspace</div><aside className="generation-panel">
       <div className="panel-label">Generation workspace</div>
       <div className="generation-prefix-control"><select onChange={(event) => onChangePrefix(event.target.value)} value={generationPrefixSelection}><option value="">Не выбрано</option>{parseGenerationPrefixes(generationPrefixOptions).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select><button aria-label="Редактировать варианты промта" onClick={onEditPrefixes} type="button">✎</button></div>
       <button
@@ -890,7 +890,7 @@ function GenerationWorkspace({
       <button disabled type="button">Video generation</button>
       <button disabled type="button">Trend analysis</button>
       <button disabled type="button">Caption and hashtags</button>
-    </aside>
+    </aside></div>
   );
 }
 
