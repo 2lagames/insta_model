@@ -911,7 +911,10 @@ function Preview({
           ) : null}
         </div>
         </div>
-        <MediaSelector materials={materials} onSelect={onSelectMaterial} onSelectAll={() => setSelectedForGeneration(materials.map((material) => material.id))} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
+        <div className="media-column">
+          <div className="panel-label">Media</div>
+          <MediaSelector materials={materials} onSelect={onSelectMaterial} onSelectAll={() => setSelectedForGeneration(materials.map((material) => material.id))} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
+        </div>
         <aside className="preview-details"><div className="panel-label">Info</div>
           <div className="info-content">
             <section className="caption-panel">
@@ -1040,7 +1043,6 @@ function MediaSelector({
 }) {
   return (
     <aside className="media-selector">
-      <div className="panel-label">Media</div>
       <div className="media-list">
         {materials.map((material) => (
           <div className={["gallery-item", material.id === selected?.id ? "selected" : "", selectedForGeneration.includes(material.id) ? "queued" : ""].filter(Boolean).join(" ")} key={material.id}>

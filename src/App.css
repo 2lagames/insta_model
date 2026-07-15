@@ -395,6 +395,10 @@ input {
   flex-direction: column;
 }
 
+.media-column {
+  min-width: 0;
+}
+
 .media-list {
   min-height: 0;
   flex: 1;
@@ -743,7 +747,7 @@ input {
 }
 
 .prompt-editors textarea {
-  height: calc(8 * 1.45em + 20px);
+  height: calc(8 * 1.45em + 22px);
   line-height: 1.45;
   overflow-y: auto;
   resize: vertical;

@@ -64,12 +64,16 @@ describe("studio preview layout", () => {
     expect(cssSource).toContain("overflow-y: auto");
   });
 
-  it("bounds the Media card list separately from its select-all control", () => {
+  it("places the Media label above a stage-height selector", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const cssSource = readFileSync("src/App.css", "utf8");
+    const previewStart = appSource.indexOf("function Preview({");
+    const preview = appSource.slice(previewStart, appSource.indexOf("function GenerationWorkspace", previewStart));
     const mediaSelectorStart = appSource.indexOf("function MediaSelector({");
     const mediaSelector = appSource.slice(mediaSelectorStart, appSource.indexOf("function PromptEditors", mediaSelectorStart));
 
+    expect(preview).toContain('<div className="media-column">\n          <div className="panel-label">Media</div>\n          <MediaSelector');
+    expect(mediaSelector).not.toContain('className="panel-label"');
     expect(mediaSelector).toContain('className="media-list"');
     expect(mediaSelector).toContain(">Выбрать все</button>");
     expect(mediaSelector.indexOf('className="media-list"')).toBeLessThan(mediaSelector.indexOf(">Выбрать все</button>"));
@@ -77,6 +81,7 @@ describe("studio preview layout", () => {
     expect(cssSource).toContain(".media-list {\n  min-height: 0;\n  flex: 1;");
     expect(cssSource).toContain(".media-list {\n  min-height: 0;\n  flex: 1;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  overflow-y: auto;");
     expect(cssSource).toContain(".media-selector > button {\n  height: 42px;\n  margin-top: 8px;");
+    expect(cssSource).toContain(".media-column {\n  min-width: 0;\n}");
   });
 
   it("uses a scrollable eight-line prompt editor that users can expand", () => {
@@ -84,7 +89,7 @@ describe("studio preview layout", () => {
     const cssSource = readFileSync("src/App.css", "utf8");
 
     expect(appSource).toContain("<textarea disabled={isBusy} rows={8}");
-    expect(cssSource).toContain(".prompt-editors textarea {\n  height: calc(8 * 1.45em + 20px);");
+    expect(cssSource).toContain(".prompt-editors textarea {\n  height: calc(8 * 1.45em + 22px);");
     expect(cssSource).toContain("overflow-y: auto;");
     expect(cssSource).toContain("resize: vertical;");
     expect(cssSource).not.toContain(".prompt-editors textarea {\n  max-height:");
