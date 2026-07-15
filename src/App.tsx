@@ -22,9 +22,9 @@ import { validateInstagramUrl } from "./lib/instagramUrl";
 import { createMediaMaterials, createSessionMediaMaterials, type MediaMaterial } from "./lib/mediaMaterials";
 import { toggleMediaSelection } from "./lib/mediaSelection";
 import {
-  createPromptDocuments,
   editPromptDocument,
   getCurrentPrompt,
+  mergePromptDocuments,
   redoPromptDocument,
   resetPromptDocument,
   undoPromptDocument,
@@ -79,8 +79,7 @@ export default function App() {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [connections, setConnections] = useState<PublicConnections>({
     hasScrapeCreatorsApiKey: false,
-    hasRunningHubApiKey: false,
-    hasRunningHubWorkflow: false
+    hasRunningHubApiKey: false
   });
   const [editingKey, setEditingKey] = useState<ConnectionKeyName | null>(null);
   const [editingKeyValue, setEditingKeyValue] = useState("");
@@ -194,9 +193,9 @@ export default function App() {
         setConnections(loadedConnections);
         setRunningHubWorkflowId(loadedConnections.runningHubWorkflowId ?? "");
         setRunningHubPromptNodeId(loadedConnections.runningHubPromptNodeId ?? "");
-        setRunningHubPromptFieldName(loadedConnections.runningHubPromptFieldName ?? "text");
+        setRunningHubPromptFieldName(loadedConnections.runningHubPromptFieldName ?? "");
         setRunningHubImageNodeId(loadedConnections.runningHubImageNodeId ?? "");
-        setRunningHubImageFieldName(loadedConnections.runningHubImageFieldName ?? "image");
+        setRunningHubImageFieldName(loadedConnections.runningHubImageFieldName ?? "");
         setOllamaProvider(loadedConnections.ollamaProvider ?? "local");
         setOllamaCloudModel(loadedConnections.ollamaCloudModel ?? "");
         setOllamaLocalModel(loadedConnections.ollamaLocalModel ?? "");
@@ -329,7 +328,7 @@ export default function App() {
       });
       setConnections(savedConnections);
       const generated = await generateImagePrompts(selectedPromptMedia);
-      setPromptDocuments(createPromptDocuments(generated.prompts));
+      setPromptDocuments((current) => mergePromptDocuments(current, generated.prompts));
       setCurrentSession(generated.session);
       setSessionMediaItemIds(generated.session.itemIds);
       setIsMediaSessionReset(false);
@@ -403,9 +402,9 @@ export default function App() {
       setConnections(saved);
       setRunningHubWorkflowId(saved.runningHubWorkflowId ?? "");
       setRunningHubPromptNodeId(saved.runningHubPromptNodeId ?? "");
-      setRunningHubPromptFieldName(saved.runningHubPromptFieldName ?? "text");
+      setRunningHubPromptFieldName(saved.runningHubPromptFieldName ?? "");
       setRunningHubImageNodeId(saved.runningHubImageNodeId ?? "");
-      setRunningHubImageFieldName(saved.runningHubImageFieldName ?? "image");
+      setRunningHubImageFieldName(saved.runningHubImageFieldName ?? "");
       recordStatus({ tone: "ready", message: "Connections saved locally." });
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });

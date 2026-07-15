@@ -3,6 +3,7 @@ import {
   createPromptDocuments,
   editPromptDocument,
   getCurrentPrompt,
+  mergePromptDocuments,
   redoPromptDocument,
   resetPromptDocument,
   undoPromptDocument,
@@ -76,5 +77,23 @@ describe("prompt documents", () => {
 
     expect(getCurrentPrompt(edited[1])).toBe("other");
     expect(edited[1]).toBe(initial[1]);
+  });
+
+  it("replaces generated documents by media ID without discarding edits for other media", () => {
+    const initial = createPromptDocuments([
+      { mediaId: "media-1", label: "Image", prompt: "first original" },
+      { mediaId: "media-2", label: "Video", prompt: "second original" },
+    ]);
+    const edited = editPromptDocument(initial, "media-1", "first revised");
+
+    const merged = mergePromptDocuments(edited, [
+      { mediaId: "media-2", label: "Video", prompt: "second regenerated" },
+      { mediaId: "media-3", label: "Image", prompt: "third generated" },
+    ]);
+
+    expect(merged).toHaveLength(3);
+    expect(getCurrentPrompt(merged.find((document) => document.mediaId === "media-1")!)).toBe("first revised");
+    expect(getCurrentPrompt(merged.find((document) => document.mediaId === "media-2")!)).toBe("second regenerated");
+    expect(getCurrentPrompt(merged.find((document) => document.mediaId === "media-3")!)).toBe("third generated");
   });
 });

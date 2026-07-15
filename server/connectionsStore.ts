@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { defaultPromptInstruction } from "./ideogramPrompt";
 
 export type PrivateConnections = {
   scrapeCreatorsApiKey?: string;
@@ -14,8 +15,6 @@ export type PrivateConnections = {
   runningHubPromptFieldName?: string;
   runningHubImageNodeId?: string;
   runningHubImageFieldName?: string;
-  runningHubWorkflowFileName?: string;
-  runningHubWorkflowJson?: string;
 };
 
 export type ConnectionKeyName = "scrapeCreatorsApiKey" | "ollamaCloudApiKey" | "runningHubApiKey";
@@ -31,8 +30,6 @@ export type PublicConnections = {
   ollamaPromptInstruction?: string;
   hasRunningHubApiKey: boolean;
   runningHubApiKeyPreview?: string;
-  hasRunningHubWorkflow: boolean;
-  runningHubWorkflowFileName?: string;
   runningHubWorkflowId?: string;
   runningHubPromptNodeId?: string;
   runningHubPromptFieldName?: string;
@@ -64,7 +61,6 @@ export class ConnectionsStore {
     const apiKey = connections.scrapeCreatorsApiKey?.trim();
     const ollamaCloudApiKey = connections.ollamaCloudApiKey?.trim();
     const runningHubApiKey = connections.runningHubApiKey?.trim();
-    const runningHubWorkflowJson = connections.runningHubWorkflowJson?.trim();
 
     return {
       hasScrapeCreatorsApiKey: Boolean(apiKey),
@@ -74,11 +70,9 @@ export class ConnectionsStore {
       ...(connections.ollamaProvider ? { ollamaProvider: connections.ollamaProvider } : {}),
       ...(connections.ollamaCloudModel ? { ollamaCloudModel: connections.ollamaCloudModel } : {}),
       ...(connections.ollamaLocalModel ? { ollamaLocalModel: connections.ollamaLocalModel } : {}),
-      ...(connections.ollamaPromptInstruction ? { ollamaPromptInstruction: connections.ollamaPromptInstruction } : {}),
+      ollamaPromptInstruction: connections.ollamaPromptInstruction ?? defaultPromptInstruction,
       hasRunningHubApiKey: Boolean(runningHubApiKey),
       ...(runningHubApiKey ? { runningHubApiKeyPreview: maskSecret(runningHubApiKey) } : {}),
-      hasRunningHubWorkflow: Boolean(runningHubWorkflowJson),
-      ...(connections.runningHubWorkflowFileName ? { runningHubWorkflowFileName: connections.runningHubWorkflowFileName } : {}),
       ...(connections.runningHubWorkflowId ? { runningHubWorkflowId: connections.runningHubWorkflowId } : {}),
       ...(connections.runningHubPromptNodeId ? { runningHubPromptNodeId: connections.runningHubPromptNodeId } : {}),
       ...(connections.runningHubPromptFieldName ? { runningHubPromptFieldName: connections.runningHubPromptFieldName } : {}),
@@ -114,19 +108,15 @@ export class ConnectionsStore {
     const scrapeCreatorsApiKey = normalizeSecret(next.scrapeCreatorsApiKey, current.scrapeCreatorsApiKey);
     const ollamaCloudApiKey = normalizeSecret(next.ollamaCloudApiKey, current.ollamaCloudApiKey);
     const runningHubApiKey = normalizeSecret(next.runningHubApiKey, current.runningHubApiKey);
-    const runningHubWorkflowJson = next.runningHubWorkflowJson?.trim()
-      ? next.runningHubWorkflowJson
-      : current.runningHubWorkflowJson;
-    const runningHubWorkflowFileName = next.runningHubWorkflowJson?.trim()
-      ? next.runningHubWorkflowFileName?.trim()
-      : next.runningHubWorkflowFileName?.trim() || current.runningHubWorkflowFileName;
     const runningHubWorkflowId = normalizeSetting(next.runningHubWorkflowId, current.runningHubWorkflowId);
     const runningHubPromptNodeId = normalizeSetting(next.runningHubPromptNodeId, current.runningHubPromptNodeId);
     const runningHubPromptFieldName = normalizeSetting(next.runningHubPromptFieldName, current.runningHubPromptFieldName);
     const ollamaProvider = next.ollamaProvider ?? current.ollamaProvider;
     const ollamaCloudModel = normalizeSetting(next.ollamaCloudModel, current.ollamaCloudModel);
     const ollamaLocalModel = normalizeSetting(next.ollamaLocalModel, current.ollamaLocalModel);
-    const ollamaPromptInstruction = normalizeSetting(next.ollamaPromptInstruction, current.ollamaPromptInstruction);
+    const ollamaPromptInstruction = next.ollamaPromptInstruction === undefined
+      ? current.ollamaPromptInstruction
+      : next.ollamaPromptInstruction.trim();
     const runningHubImageNodeId = normalizeSetting(next.runningHubImageNodeId, current.runningHubImageNodeId);
     const runningHubImageFieldName = normalizeSetting(next.runningHubImageFieldName, current.runningHubImageFieldName);
 
@@ -136,15 +126,13 @@ export class ConnectionsStore {
       ...(ollamaProvider ? { ollamaProvider } : {}),
       ...(ollamaCloudModel ? { ollamaCloudModel } : {}),
       ...(ollamaLocalModel ? { ollamaLocalModel } : {}),
-      ...(ollamaPromptInstruction ? { ollamaPromptInstruction } : {}),
+      ...(ollamaPromptInstruction !== undefined ? { ollamaPromptInstruction } : {}),
       ...(runningHubApiKey ? { runningHubApiKey } : {}),
       ...(runningHubWorkflowId ? { runningHubWorkflowId } : {}),
       ...(runningHubPromptNodeId ? { runningHubPromptNodeId } : {}),
       ...(runningHubPromptFieldName ? { runningHubPromptFieldName } : {}),
       ...(runningHubImageNodeId ? { runningHubImageNodeId } : {}),
       ...(runningHubImageFieldName ? { runningHubImageFieldName } : {}),
-      ...(runningHubWorkflowFileName ? { runningHubWorkflowFileName } : {}),
-      ...(runningHubWorkflowJson ? { runningHubWorkflowJson } : {})
     };
 
     await this.write(data);

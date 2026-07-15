@@ -101,8 +101,6 @@ export type ConnectionSaveInput = {
   runningHubPromptFieldName?: string;
   runningHubImageNodeId?: string;
   runningHubImageFieldName?: string;
-  runningHubWorkflowFileName?: string;
-  runningHubWorkflowJson?: string;
 };
 
 export type HealthResponse = {
@@ -122,8 +120,6 @@ export type PublicConnections = {
   ollamaPromptInstruction?: string;
   hasRunningHubApiKey: boolean;
   runningHubApiKeyPreview?: string;
-  hasRunningHubWorkflow: boolean;
-  runningHubWorkflowFileName?: string;
   runningHubWorkflowId?: string;
   runningHubPromptNodeId?: string;
   runningHubPromptFieldName?: string;

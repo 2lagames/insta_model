@@ -5,10 +5,11 @@ import type { ImportAsset, ImportItem } from "../src/lib/importTypes";
 import { validateInstagramUrl } from "../src/lib/instagramUrl";
 import { ActivityLog } from "./activityLog";
 import { ConnectionsStore, type ConnectionKeyName } from "./connectionsStore";
-import { defaultPromptInstruction, type PromptMediaInput } from "./ideogramPrompt";
+import { type PromptMediaInput } from "./ideogramPrompt";
 import { ImportStore, normalizeCurrentSession } from "./importStore";
 import { checkScrapeCreatorsPostAccess, importInstagramUrl } from "./instagramImporter";
 import { generateOllamaPrompt, listOllamaModels } from "./ollamaClient";
+import { getActiveOllamaConfiguration } from "./ollamaConfiguration";
 import { runRunningHubImageGeneration } from "./runningHub";
 
 const port = Number(process.env.API_PORT ?? 4317);
@@ -301,9 +302,9 @@ app.post("/api/generation/images", async (request, response) => {
         apiKey: connections.runningHubApiKey ?? "",
         workflowId: connections.runningHubWorkflowId ?? "",
         promptNodeId: connections.runningHubPromptNodeId ?? "",
-        promptFieldName: connections.runningHubPromptFieldName ?? "text",
+        promptFieldName: connections.runningHubPromptFieldName ?? "",
         imageNodeId: connections.runningHubImageNodeId ?? "",
-        imageFieldName: connections.runningHubImageFieldName ?? "image"
+        imageFieldName: connections.runningHubImageFieldName ?? ""
       },
       jobs: jobs.map((job) => ({
         mediaId: job.media.id,
@@ -361,31 +362,6 @@ function parseConnectionKeyName(value: unknown): ConnectionKeyName {
     return value;
   }
   throw new Error("Unknown connection key.");
-}
-
-function getActiveOllamaConfiguration(connections: Awaited<ReturnType<ConnectionsStore["readPrivate"]>>): {
-  provider: "cloud" | "local";
-  apiKey?: string;
-  model: string;
-  instruction: string;
-} {
-  const provider = connections.ollamaProvider ?? "local";
-  const model = provider === "cloud" ? connections.ollamaCloudModel : connections.ollamaLocalModel;
-  if (!model?.trim()) {
-    throw new Error(`Select an Ollama ${provider === "cloud" ? "Cloud" : "local"} model on the Подключения tab before prompt generation.`);
-  }
-  if (provider === "cloud" && !connections.ollamaCloudApiKey?.trim()) {
-    throw new Error("Add Ollama Cloud API key on the Подключения tab before prompt generation.");
-  }
-  if (!connections.ollamaPromptInstruction?.trim() && !defaultPromptInstruction.trim()) {
-    throw new Error("Add a prompt instruction on the Подключения tab before prompt generation.");
-  }
-  return {
-    provider,
-    apiKey: connections.ollamaCloudApiKey,
-    model,
-    instruction: connections.ollamaPromptInstruction?.trim() || defaultPromptInstruction
-  };
 }
 
 function resolvePromptMediaImagePath(imagePath: string): string {

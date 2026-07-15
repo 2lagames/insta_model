@@ -113,6 +113,45 @@ describe("runRunningHubImageGeneration", () => {
     }
   });
 
+  it("rejects an upload response missing data.fileName before creating a task", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "runninghub-"));
+    const imagePath = join(tempDir, "source.png");
+    let createCalls = 0;
+    await writeFile(imagePath, "source-image");
+    const fetchImpl = (async (url: URL | RequestInfo) => {
+      const requestUrl = new URL(String(url));
+      if (requestUrl.pathname.endsWith("/task/openapi/upload")) {
+        return new Response(JSON.stringify({ code: 0, data: {} }), { status: 200 });
+      }
+      if (requestUrl.pathname.endsWith("/task/openapi/create")) {
+        createCalls += 1;
+      }
+      throw new Error(`Unexpected request: ${requestUrl.toString()}`);
+    }) as typeof fetch;
+
+    try {
+      await expect(runRunningHubImageGeneration({
+        outputDir: join(tempDir, "output"),
+        now: new Date("2026-06-25T10:30:00.000Z"),
+        fetchImpl,
+        baseUrl: "https://runninghub.example.com",
+        config: {
+          apiKey: "rh_api_key",
+          workflowId: "workflow",
+          promptNodeId: "6",
+          promptFieldName: "text",
+          imageNodeId: "39",
+          imageFieldName: "image"
+        },
+        jobs: [{ mediaId: "media-1", label: "Image", imagePath, prompt: "new prompt" }]
+      })).rejects.toThrow("data.fileName");
+
+      expect(createCalls).toBe(0);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("creates one task per selected prompt and saves every image returned by RunningHub", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "runninghub-"));
     const outputDir = join(tempDir, "output");

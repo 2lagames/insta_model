@@ -22,6 +22,22 @@ export function createPromptDocuments(prompts: PromptDocumentInput[]): PromptDoc
   }));
 }
 
+export function mergePromptDocuments(
+  documents: PromptDocument[],
+  prompts: PromptDocumentInput[],
+): PromptDocument[] {
+  const replacements = new Map(createPromptDocuments(prompts).map((document) => [document.mediaId, document]));
+  const merged = documents.map((document) => replacements.get(document.mediaId) ?? document);
+  const existingMediaIds = new Set(documents.map((document) => document.mediaId));
+
+  return [
+    ...merged,
+    ...prompts
+      .filter((prompt) => !existingMediaIds.has(prompt.mediaId))
+      .map((prompt) => replacements.get(prompt.mediaId)!),
+  ];
+}
+
 export function getCurrentPrompt(document: PromptDocument): string {
   return document.history[document.historyIndex];
 }
