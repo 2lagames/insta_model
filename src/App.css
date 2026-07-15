@@ -369,8 +369,15 @@ input {
   gap: 8px;
 }
 
+.image-generation-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 8px;
+}
+
 .generation-prefix-control select,
-.generation-prefix-control button {
+.generation-prefix-control button,
+.image-generation-control select {
   height: 42px;
   border: 1px solid #2c2a26;
   border-radius: 8px;
@@ -381,6 +388,7 @@ input {
 
 .generation-prefix-control select { padding: 0 12px; }
 .generation-prefix-control button { padding: 0; cursor: pointer; font-size: 20px; }
+.image-generation-control select { padding: 0; text-align: center; }
 
 .generation-panel button:disabled {
   color: #8d857a;

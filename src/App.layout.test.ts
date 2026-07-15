@@ -198,6 +198,24 @@ describe("studio preview layout", () => {
     expect(generationHandler).toContain("setSessionMediaItemIds(generated.session.itemIds)");
   });
 
+  it("lets users choose one to ten image generations per selected media item", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const cssSource = readFileSync("src/App.css", "utf8");
+    const generationStart = appSource.indexOf("async function handleGenerateImages()");
+    const generationHandler = appSource.slice(generationStart, appSource.indexOf("function handleCancelGeneration", generationStart));
+    const generationWorkspaceStart = appSource.indexOf("function GenerationWorkspace({");
+    const generationWorkspace = appSource.slice(generationWorkspaceStart, appSource.indexOf("function MediaSelector", generationWorkspaceStart));
+
+    expect(appSource).toContain("const [imageGenerationsPerMedia, setImageGenerationsPerMedia] = useState(1);");
+    expect(generationHandler).toContain("repeatImageGenerationJobs(promptImageJobs, imageGenerationsPerMedia)");
+    expect(generationWorkspace).toContain('className="image-generation-control"');
+    expect(generationWorkspace).toContain('aria-label="Количество генераций на изображение"');
+    expect(generationWorkspace).toContain("Array.from({ length: 10 }");
+    expect(generationWorkspace).toContain("Image generation (${imageGenerationCount})");
+    expect(cssSource).toContain(".image-generation-control {");
+    expect(cssSource).toContain(".image-generation-control select {");
+  });
+
   it("keeps every successful batch upload reflected locally before a later upload can fail", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const uploadStart = appSource.indexOf("async function handleLocalImageUpload");
@@ -206,7 +224,7 @@ describe("studio preview layout", () => {
     expect(uploadHandler).toContain("const imported = await uploadLocalImage");
     expect(uploadHandler).toContain("setCurrentSession(imported.session)");
     expect(uploadHandler).toContain("setSessionMediaItemIds(imported.session.itemIds)");
-    expect(uploadHandler).toContain("setSelectedForGeneration([])");
+    expect(uploadHandler).toContain("setSelectedForGeneration(firstImportedMedia[0]?.id ? [firstImportedMedia[0].id] : []);");
     expect(uploadHandler.indexOf("setCurrentSession(imported.session)")).toBeLessThan(uploadHandler.indexOf("} catch"));
   });
 

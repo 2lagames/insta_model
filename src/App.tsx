@@ -82,6 +82,7 @@ export default function App() {
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [isBackendCurrent, setIsBackendCurrent] = useState(true);
   const [selectedForGeneration, setSelectedForGeneration] = useState<string[]>([]);
+  const [imageGenerationsPerMedia, setImageGenerationsPerMedia] = useState(1);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [connections, setConnections] = useState<PublicConnections>({
     hasScrapeCreatorsApiKey: false,
@@ -394,7 +395,7 @@ export default function App() {
         setSessionMediaItemIds(imported.session.itemIds);
         setIsMediaSessionReset(false);
         setSelectedMediaId(firstImportedMedia[0]?.id ?? null);
-        setSelectedForGeneration([]);
+        setSelectedForGeneration(firstImportedMedia[0]?.id ? [firstImportedMedia[0].id] : []);
         setPromptDocuments([]);
         setUrl("");
         setUrlNotice("Локальное изображение — ссылка Instagram отсутствует");
@@ -584,10 +585,11 @@ export default function App() {
     try {
       const selectedPrompts = await createSelectedPrompts(abortController.signal);
       const promptsByMediaId = new Map(selectedPrompts.map((prompt) => [prompt.mediaId, prompt.prompt]));
-      const imageJobs = selectedPromptMedia.flatMap((media) => {
+      const promptImageJobs = selectedPromptMedia.flatMap((media) => {
         const prompt = promptsByMediaId.get(media.id);
         return prompt === undefined ? [] : [{ media, prompt }];
       });
+      const imageJobs = repeatImageGenerationJobs(promptImageJobs, imageGenerationsPerMedia);
       for (const imageJob of imageJobs) {
         const generated = await generateImagesWithOptions([imageJob], { signal: abortController.signal });
         setItems((current) => [generated.item, ...current.filter((item) => item.id !== generated.item.id)]);
@@ -812,7 +814,9 @@ export default function App() {
               <Preview
                 generationPrefixOptions={generationPrefixOptions}
                 generationPrefixSelection={generationPrefixSelection}
+                imageGenerationsPerMedia={imageGenerationsPerMedia}
                 onChangePrefix={setGenerationPrefixSelection}
+                onChangeImageGenerationsPerMedia={setImageGenerationsPerMedia}
                 onEditPrefixes={() => setIsEditingGenerationPrefixes(true)}
                 isSessionMutationBusy={isSessionMutationBusy}
                 isGeneratingPrompt={isGeneratingPrompt}
@@ -958,7 +962,9 @@ export default function App() {
 function Preview({
   generationPrefixOptions,
   generationPrefixSelection,
+  imageGenerationsPerMedia,
   onChangePrefix,
+  onChangeImageGenerationsPerMedia,
   onEditPrefixes,
   isSessionMutationBusy,
   isGeneratingPrompt,
@@ -979,7 +985,9 @@ function Preview({
 }: {
   generationPrefixOptions: string;
   generationPrefixSelection: string;
+  imageGenerationsPerMedia: number;
   onChangePrefix: (value: string) => void;
+  onChangeImageGenerationsPerMedia: (value: number) => void;
   onEditPrefixes: () => void;
   isSessionMutationBusy: boolean;
   isGeneratingPrompt: boolean;
@@ -1052,7 +1060,9 @@ function Preview({
         <GenerationWorkspace
           generationPrefixOptions={generationPrefixOptions}
           generationPrefixSelection={generationPrefixSelection}
+          imageGenerationsPerMedia={imageGenerationsPerMedia}
           onChangePrefix={onChangePrefix}
+          onChangeImageGenerationsPerMedia={onChangeImageGenerationsPerMedia}
           onEditPrefixes={onEditPrefixes}
           isSessionMutationBusy={isSessionMutationBusy}
           isGeneratingImages={isGeneratingImages}
@@ -1088,7 +1098,9 @@ function parseGenerationPrefixes(value: string): Array<{ name: string; text: str
 function GenerationWorkspace({
   generationPrefixOptions,
   generationPrefixSelection,
+  imageGenerationsPerMedia,
   onChangePrefix,
+  onChangeImageGenerationsPerMedia,
   onEditPrefixes,
   isSessionMutationBusy,
   isGeneratingImages,
@@ -1100,7 +1112,9 @@ function GenerationWorkspace({
 }: {
   generationPrefixOptions: string;
   generationPrefixSelection: string;
+  imageGenerationsPerMedia: number;
   onChangePrefix: (value: string) => void;
+  onChangeImageGenerationsPerMedia: (value: number) => void;
   onEditPrefixes: () => void;
   isSessionMutationBusy: boolean;
   isGeneratingImages: boolean;
@@ -1110,6 +1124,8 @@ function GenerationWorkspace({
   onCancelGeneration: () => void;
   selectedForGenerationCount: number;
 }) {
+  const imageGenerationCount = selectedForGenerationCount * imageGenerationsPerMedia;
+
   return (
     <div className="generation-column"><div className="panel-label">Generation workspace</div><aside className="generation-panel">
       <div className="generation-prefix-control"><select onChange={(event) => onChangePrefix(event.target.value)} value={generationPrefixSelection}><option value="">Не выбрано</option>{parseGenerationPrefixes(generationPrefixOptions).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select><button aria-label="Редактировать варианты промта" onClick={onEditPrefixes} type="button">✎</button></div>
@@ -1120,13 +1136,18 @@ function GenerationWorkspace({
       >
         {isGeneratingPrompt ? "Generating" : `Generate prompt (${selectedForGenerationCount})`}
       </button>
-      <button
-        disabled={isSessionMutationBusy}
-        onClick={onGenerateImages}
-        type="button"
-      >
-        {isGeneratingImages ? "Generating" : `Image generation (${selectedForGenerationCount})`}
-      </button>
+      <div className="image-generation-control">
+        <button
+          disabled={isSessionMutationBusy || selectedForGenerationCount === 0}
+          onClick={onGenerateImages}
+          type="button"
+        >
+          {isGeneratingImages ? "Generating" : `Image generation (${imageGenerationCount})`}
+        </button>
+        <select aria-label="Количество генераций на изображение" disabled={isSessionMutationBusy} onChange={(event) => onChangeImageGenerationsPerMedia(Number(event.target.value))} value={imageGenerationsPerMedia}>
+          {Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count}</option>)}
+        </select>
+      </div>
       <button disabled type="button">Video generation</button>
       <button disabled type="button">Trend analysis</button>
       <button disabled type="button">Caption and hashtags</button>
@@ -1379,6 +1400,10 @@ function createSelectedPromptMedia(
     .filter((material) => selectedForGeneration.includes(material.id))
     .map((material) => createPromptMediaInput(material, currentSession))
     .filter((material): material is PromptMediaInput => Boolean(material));
+}
+
+function repeatImageGenerationJobs<T>(jobs: T[], count: number): T[] {
+  return jobs.flatMap((job) => Array.from({ length: count }, () => job));
 }
 
 function toErrorMessage(error: unknown): string {
