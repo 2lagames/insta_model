@@ -63,12 +63,15 @@ input {
 }
 
 .top-bar {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) 112px 160px 112px 132px;
+  display: flex;
+  min-width: 0;
+  align-items: center;
   gap: 10px;
 }
 
 .url-input {
+  min-width: 120px;
+  flex: 1 1 220px;
   height: 42px;
   border: 1px solid #c9c4ba;
   border-radius: 8px;
@@ -87,6 +90,7 @@ input {
 }
 
 .upload-image-button {
+  flex: 0 0 auto;
   display: grid;
   place-items: center;
   min-width: 190px;
@@ -703,6 +707,11 @@ input {
   .connection-card,
   .connections-grid {
     grid-template-columns: 1fr;
+  }
+
+  .top-bar {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .media-stage {
