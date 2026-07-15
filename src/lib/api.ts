@@ -218,7 +218,7 @@ export async function uploadLocalImage(file: File): Promise<ImportInstagramResul
     method: "POST",
     headers: {
       "Content-Type": file.type || "application/octet-stream",
-      "X-File-Name": file.name
+      "X-File-Name": encodeURIComponent(file.name)
     },
     body: file
   });

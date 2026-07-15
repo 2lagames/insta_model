@@ -89,6 +89,8 @@ input {
 .upload-image-button {
   display: grid;
   place-items: center;
+  min-width: 190px;
+  white-space: nowrap;
 }
 
 .upload-image-button input {

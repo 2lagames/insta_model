@@ -60,7 +60,8 @@ app.post("/api/imports/upload-image", express.raw({ type: "image/*", limit: "25m
       response.status(400).json({ error: "Choose a non-empty image file." });
       return;
     }
-    const fileName = basename(String(request.header("X-File-Name") ?? "image"));
+    const encodedFileName = String(request.header("X-File-Name") ?? "image");
+    const fileName = basename(decodeURIComponent(encodedFileName));
     const extension = extname(fileName) || imageExtension(request.header("Content-Type") ?? "");
     const id = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const folder = join(inputDir, "local", formatDateFolder(new Date()));
