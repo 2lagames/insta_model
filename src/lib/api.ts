@@ -38,13 +38,18 @@ type ErrorResponse = {
   error?: string;
 };
 
-type PromptGenerationResponse = {
+export type GeneratedPrompt = {
+  mediaId: string;
+  label: string;
   prompt: string;
+};
+
+type PromptGenerationResponse = {
+  prompts: GeneratedPrompt[];
   session?: CurrentMediaSession;
 };
 
 type ImageGenerationResponse = {
-  prompt: string;
   item: ImportItem;
   session?: CurrentMediaSession;
 };
@@ -63,22 +68,39 @@ export type CleanupImportsResult = {
 };
 
 export type ImageGenerationResult = {
-  prompt: string;
   item: ImportItem;
   session: CurrentMediaSession;
 };
 
 export type PromptGenerationResult = {
-  prompt: string;
+  prompts: GeneratedPrompt[];
   session: CurrentMediaSession;
+};
+
+export type ImageGenerationJobInput = {
+  media: PromptMediaInput;
+  prompt: string;
+};
+
+export type ConnectionKeyName = "scrapeCreatorsApiKey" | "ollamaCloudApiKey" | "runningHubApiKey";
+
+export type OllamaModel = {
+  name: string;
 };
 
 export type ConnectionSaveInput = {
   scrapeCreatorsApiKey?: string;
+  ollamaCloudApiKey?: string;
+  ollamaProvider?: "cloud" | "local";
+  ollamaCloudModel?: string;
+  ollamaLocalModel?: string;
+  ollamaPromptInstruction?: string;
   runningHubApiKey?: string;
   runningHubWorkflowId?: string;
   runningHubPromptNodeId?: string;
   runningHubPromptFieldName?: string;
+  runningHubImageNodeId?: string;
+  runningHubImageFieldName?: string;
   runningHubWorkflowFileName?: string;
   runningHubWorkflowJson?: string;
 };
@@ -92,6 +114,12 @@ export type HealthResponse = {
 export type PublicConnections = {
   hasScrapeCreatorsApiKey: boolean;
   scrapeCreatorsApiKeyPreview?: string;
+  hasOllamaCloudApiKey?: boolean;
+  ollamaCloudApiKeyPreview?: string;
+  ollamaProvider?: "cloud" | "local";
+  ollamaCloudModel?: string;
+  ollamaLocalModel?: string;
+  ollamaPromptInstruction?: string;
   hasRunningHubApiKey: boolean;
   runningHubApiKeyPreview?: string;
   hasRunningHubWorkflow: boolean;
@@ -99,6 +127,8 @@ export type PublicConnections = {
   runningHubWorkflowId?: string;
   runningHubPromptNodeId?: string;
   runningHubPromptFieldName?: string;
+  runningHubImageNodeId?: string;
+  runningHubImageFieldName?: string;
 };
 
 export async function listImports(): Promise<ImportsSessionResponse> {
@@ -135,6 +165,36 @@ export async function saveConnections(input: ConnectionSaveInput): Promise<Publi
   });
   await assertOk(response);
   return await response.json() as PublicConnections;
+}
+
+export async function getConnectionKey(keyName: ConnectionKeyName): Promise<string> {
+  const response = await apiFetch(`/api/connections/keys/${keyName}`);
+  await assertOk(response);
+  const data = await response.json() as { key?: string };
+  return data.key ?? "";
+}
+
+export async function saveConnectionKey(keyName: ConnectionKeyName, key: string): Promise<void> {
+  const response = await apiFetch(`/api/connections/keys/${keyName}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ key })
+  });
+  await assertOk(response);
+}
+
+export async function clearConnectionKey(keyName: ConnectionKeyName): Promise<void> {
+  const response = await apiFetch(`/api/connections/keys/${keyName}`, { method: "DELETE" });
+  await assertOk(response);
+}
+
+export async function listOllamaModels(provider: "cloud" | "local"): Promise<OllamaModel[]> {
+  const response = await apiFetch(`/api/ollama/models?provider=${provider}`);
+  await assertOk(response);
+  const data = await response.json() as { models?: OllamaModel[] };
+  return data.models ?? [];
 }
 
 export async function importInstagramUrl(
@@ -212,23 +272,22 @@ export async function generateImagePrompts(media: PromptMediaInput[]): Promise<P
   await assertOk(response);
   const data = await response.json() as PromptGenerationResponse;
   return {
-    prompt: data.prompt,
+    prompts: data.prompts,
     session: data.session ?? createEmptySession()
   };
 }
 
-export async function generateImages(media: PromptMediaInput[]): Promise<ImageGenerationResult> {
+export async function generateImages(jobs: ImageGenerationJobInput[]): Promise<ImageGenerationResult> {
   const response = await apiFetch("/api/generation/images", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ media })
+    body: JSON.stringify({ jobs })
   });
   await assertOk(response);
   const data = await response.json() as ImageGenerationResponse;
   return {
-    prompt: data.prompt,
     item: data.item,
     session: data.session ?? createEmptySession()
   };
@@ -244,7 +303,7 @@ function createEmptySession(itemIds: string[] = []): CurrentMediaSession {
 
 async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(input, init);
+    return init ? await fetch(input, init) : await fetch(input);
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown network error";
     throw new Error(`Local API is not reachable. Make sure ./start.sh is running and http://127.0.0.1:4317/api/health responds. Original error: ${message}`);

@@ -1,15 +1,15 @@
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile } from "node:fs/promises";
+import { join, relative, resolve } from "node:path";
 import express from "express";
-import type { CurrentMediaSession, ImportAsset, ImportItem, SceneBible } from "../src/lib/importTypes";
+import type { ImportAsset, ImportItem } from "../src/lib/importTypes";
 import { validateInstagramUrl } from "../src/lib/instagramUrl";
 import { ActivityLog } from "./activityLog";
-import { ConnectionsStore } from "./connectionsStore";
-import { defaultOllamaModel, generateIdeogramPromptForMedia, type PromptMediaInput } from "./ideogramPrompt";
+import { ConnectionsStore, type ConnectionKeyName } from "./connectionsStore";
+import { defaultPromptInstruction, type PromptMediaInput } from "./ideogramPrompt";
 import { ImportStore, normalizeCurrentSession } from "./importStore";
 import { checkScrapeCreatorsPostAccess, importInstagramUrl } from "./instagramImporter";
-import { runRunningHubImageGeneration, type RunningHubPromptJob } from "./runningHub";
-import { createFallbackSceneData, generateSceneBiblesForImport } from "./sceneBible";
+import { generateOllamaPrompt, listOllamaModels } from "./ollamaClient";
+import { runRunningHubImageGeneration } from "./runningHub";
 
 const port = Number(process.env.API_PORT ?? 4317);
 const projectRoot = process.cwd();
@@ -64,15 +64,66 @@ app.get("/api/connections", async (_request, response) => {
 app.put("/api/connections", async (request, response) => {
   try {
     await connectionsStore.save({
-      scrapeCreatorsApiKey: String(request.body?.scrapeCreatorsApiKey ?? ""),
-      runningHubApiKey: String(request.body?.runningHubApiKey ?? ""),
-      runningHubWorkflowId: String(request.body?.runningHubWorkflowId ?? ""),
-      runningHubPromptNodeId: String(request.body?.runningHubPromptNodeId ?? ""),
-      runningHubPromptFieldName: String(request.body?.runningHubPromptFieldName ?? ""),
-      runningHubWorkflowFileName: String(request.body?.runningHubWorkflowFileName ?? ""),
-      runningHubWorkflowJson: String(request.body?.runningHubWorkflowJson ?? "")
+      scrapeCreatorsApiKey: optionalString(request.body?.scrapeCreatorsApiKey),
+      ollamaCloudApiKey: optionalString(request.body?.ollamaCloudApiKey),
+      ollamaProvider: request.body?.ollamaProvider === "cloud" || request.body?.ollamaProvider === "local"
+        ? request.body.ollamaProvider
+        : undefined,
+      ollamaCloudModel: optionalString(request.body?.ollamaCloudModel),
+      ollamaLocalModel: optionalString(request.body?.ollamaLocalModel),
+      ollamaPromptInstruction: optionalString(request.body?.ollamaPromptInstruction),
+      runningHubApiKey: optionalString(request.body?.runningHubApiKey),
+      runningHubWorkflowId: optionalString(request.body?.runningHubWorkflowId),
+      runningHubPromptNodeId: optionalString(request.body?.runningHubPromptNodeId),
+      runningHubPromptFieldName: optionalString(request.body?.runningHubPromptFieldName),
+      runningHubImageNodeId: optionalString(request.body?.runningHubImageNodeId),
+      runningHubImageFieldName: optionalString(request.body?.runningHubImageFieldName)
     });
     response.json(await connectionsStore.readPublic());
+  } catch (error) {
+    response.status(500).json({ error: toErrorMessage(error) });
+  }
+});
+
+app.get("/api/connections/keys/:keyName", async (request, response) => {
+  try {
+    const keyName = parseConnectionKeyName(request.params.keyName);
+    response.json({ key: await connectionsStore.readKey(keyName) ?? "" });
+  } catch (error) {
+    response.status(400).json({ error: toErrorMessage(error) });
+  }
+});
+
+app.put("/api/connections/keys/:keyName", async (request, response) => {
+  try {
+    const keyName = parseConnectionKeyName(request.params.keyName);
+    await connectionsStore.saveKey(keyName, optionalString(request.body?.key) ?? "");
+    response.json({ ok: true });
+  } catch (error) {
+    response.status(400).json({ error: toErrorMessage(error) });
+  }
+});
+
+app.delete("/api/connections/keys/:keyName", async (request, response) => {
+  try {
+    const keyName = parseConnectionKeyName(request.params.keyName);
+    await connectionsStore.clearKey(keyName);
+    response.json({ ok: true });
+  } catch (error) {
+    response.status(400).json({ error: toErrorMessage(error) });
+  }
+});
+
+app.get("/api/ollama/models", async (request, response) => {
+  const provider = request.query.provider === "cloud" ? "cloud" : "local";
+
+  try {
+    const connections = await connectionsStore.readPrivate();
+    if (provider === "cloud" && !connections.ollamaCloudApiKey?.trim()) {
+      response.status(400).json({ error: "Ollama Cloud API key is required." });
+      return;
+    }
+    response.json({ models: await listOllamaModels({ provider, apiKey: connections.ollamaCloudApiKey }) });
   } catch (error) {
     response.status(500).json({ error: toErrorMessage(error) });
   }
@@ -188,29 +239,45 @@ app.post("/api/open-imports-folder", async (_request, response) => {
 app.post("/api/generation/image-prompts", async (request, response) => {
   try {
     const media = parsePromptMedia(request.body?.media);
+    const connections = await connectionsStore.readPrivate();
+    const ollama = getActiveOllamaConfiguration(connections);
     activityLog.publish({
       tone: "running",
       source: "prompt",
       message: `Image prompt generation started for ${media.length} media item(s).`
     });
-    const { media: mediaWithScenes, session } = await ensureSceneBiblesForPromptMedia(media);
-    const prompt = await generateIdeogramPromptForMedia({
-      inputDir,
-      model: defaultOllamaModel,
-      media: mediaWithScenes,
-      onStatus: (event) => activityLog.publish(event)
-    });
-    activityLog.publish({
-      tone: "ready",
-      source: "prompt",
-      message: "Ideogram JSON prompt"
-    });
-    activityLog.publish({
-      tone: "ready",
-      source: "prompt",
-      message: prompt
-    });
-    response.json({ prompt, session });
+    const prompts = [];
+    for (const [index, mediaItem] of media.entries()) {
+      activityLog.publish({
+        tone: "running",
+        source: "prompt",
+        message: `Sending ${mediaItem.label} (${index + 1}/${media.length}) to ${ollama.provider} Ollama.`
+      });
+      const generatedPrompt = {
+        mediaId: mediaItem.id,
+        label: mediaItem.label,
+        prompt: await generateOllamaPrompt({
+          provider: ollama.provider,
+          apiKey: ollama.apiKey,
+          model: ollama.model,
+          prompt: ollama.instruction,
+          imageBase64: await readFile(resolvePromptMediaImagePath(mediaItem.imagePath), "base64")
+        })
+      };
+      prompts.push(generatedPrompt);
+      activityLog.publish({
+        tone: "ready",
+        source: "prompt",
+        message: `Generated prompt for ${mediaItem.label} (${index + 1}/${media.length}).`
+      });
+      activityLog.publish({
+        tone: "ready",
+        source: "prompt",
+        message: generatedPrompt.prompt
+      });
+    }
+    const session = await store.readCurrentSession();
+    response.json({ prompts, session });
   } catch (error) {
     activityLog.publish({ tone: "error", source: "prompt", message: toErrorMessage(error) });
     response.status(500).json({ error: toErrorMessage(error) });
@@ -219,24 +286,13 @@ app.post("/api/generation/image-prompts", async (request, response) => {
 
 app.post("/api/generation/images", async (request, response) => {
   try {
-    const media = parsePromptMedia(request.body?.media);
+    const jobs = parseRunningHubPromptJobs(request.body?.jobs);
     const connections = await connectionsStore.readPrivate();
+    const currentSession = await store.readCurrentSession();
     activityLog.publish({
       tone: "running",
-      source: "prompt",
-      message: `Image prompt generation started for ${media.length} media item(s).`
-    });
-    const { media: mediaWithScenes, session: currentSession } = await ensureSceneBiblesForPromptMedia(media);
-    const prompt = await generateIdeogramPromptForMedia({
-      inputDir,
-      model: defaultOllamaModel,
-      media: mediaWithScenes,
-      onStatus: (event) => activityLog.publish(event)
-    });
-    activityLog.publish({
-      tone: "ready",
-      source: "prompt",
-      message: prompt
+      source: "generation",
+      message: `RunningHub image generation started for ${jobs.length} media item(s).`
     });
 
     const runningHubResult = await runRunningHubImageGeneration({
@@ -246,9 +302,15 @@ app.post("/api/generation/images", async (request, response) => {
         workflowId: connections.runningHubWorkflowId ?? "",
         promptNodeId: connections.runningHubPromptNodeId ?? "",
         promptFieldName: connections.runningHubPromptFieldName ?? "text",
-        workflowJson: connections.runningHubWorkflowJson
+        imageNodeId: connections.runningHubImageNodeId ?? "",
+        imageFieldName: connections.runningHubImageFieldName ?? "image"
       },
-      jobs: createRunningHubPromptJobs(mediaWithScenes, prompt),
+      jobs: jobs.map((job) => ({
+        mediaId: job.media.id,
+        label: job.media.label,
+        imagePath: resolvePromptMediaImagePath(job.media.imagePath),
+        prompt: job.prompt
+      })),
       onStatus: (event) => activityLog.publish(event)
     });
     await store.saveItem(runningHubResult.item);
@@ -256,11 +318,11 @@ app.post("/api/generation/images", async (request, response) => {
       sceneBibles: currentSession.sceneBibles,
       mediaSceneMap: {
         ...currentSession.mediaSceneMap,
-        ...mapGeneratedAssetsToScenes(runningHubResult.item, runningHubResult.assets, mediaWithScenes, currentSession.mediaSceneMap)
+        ...mapGeneratedAssetsToScenes(runningHubResult.item, runningHubResult.assets, jobs.map((job) => job.media), currentSession.mediaSceneMap)
       }
     });
     const session = await store.readCurrentSession();
-    response.json({ prompt, item: runningHubResult.item, session });
+    response.json({ item: runningHubResult.item, session });
   } catch (error) {
     activityLog.publish({ tone: "error", source: "generation", message: toErrorMessage(error) });
     response.status(500).json({ error: toErrorMessage(error) });
@@ -290,76 +352,53 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
-async function ensureSceneBiblesForPromptMedia(media: PromptMediaInput[]): Promise<{ media: PromptMediaInput[]; session: CurrentMediaSession }> {
-  const currentSession = await store.readCurrentSession();
-  const sceneById = new Map(currentSession.sceneBibles.map((scene) => [scene.id, scene]));
-  const mediaWithKnownScenes = media.map((item) => {
-    const sceneId = item.sceneBibleId ?? currentSession.mediaSceneMap[item.id];
-    const sceneBible = item.sceneBible ?? (sceneId ? sceneById.get(sceneId) : undefined);
-    return sceneBible ? { ...item, sceneBibleId: sceneBible.id, sceneBible } : item;
-  });
-  const mediaMissingScenes = mediaWithKnownScenes.filter((item) => !item.sceneBible);
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
 
-  if (mediaMissingScenes.length === 0) {
-    return { media: mediaWithKnownScenes, session: currentSession };
+function parseConnectionKeyName(value: unknown): ConnectionKeyName {
+  if (value === "scrapeCreatorsApiKey" || value === "ollamaCloudApiKey" || value === "runningHubApiKey") {
+    return value;
   }
+  throw new Error("Unknown connection key.");
+}
 
-  activityLog.publish({
-    tone: "running",
-    source: "scene",
-    message: `Preparing scene bible for ${mediaMissingScenes.length} selected media item(s).`
-  });
-  const sceneData = await generateSceneBiblesForPromptMedia(mediaMissingScenes);
-  const nextSceneBibles = mergeSceneBibles(currentSession.sceneBibles, sceneData.sceneBibles);
-  const nextSession: CurrentMediaSession = {
-    itemIds: currentSession.itemIds,
-    sceneBibles: nextSceneBibles,
-    mediaSceneMap: {
-      ...currentSession.mediaSceneMap,
-      ...sceneData.mediaSceneMap
-    }
-  };
-  await store.writeCurrentSession(nextSession);
-
-  const nextSceneById = new Map(nextSceneBibles.map((scene) => [scene.id, scene]));
+function getActiveOllamaConfiguration(connections: Awaited<ReturnType<ConnectionsStore["readPrivate"]>>): {
+  provider: "cloud" | "local";
+  apiKey?: string;
+  model: string;
+  instruction: string;
+} {
+  const provider = connections.ollamaProvider ?? "local";
+  const model = provider === "cloud" ? connections.ollamaCloudModel : connections.ollamaLocalModel;
+  if (!model?.trim()) {
+    throw new Error(`Select an Ollama ${provider === "cloud" ? "Cloud" : "local"} model on the Подключения tab before prompt generation.`);
+  }
+  if (provider === "cloud" && !connections.ollamaCloudApiKey?.trim()) {
+    throw new Error("Add Ollama Cloud API key on the Подключения tab before prompt generation.");
+  }
+  if (!connections.ollamaPromptInstruction?.trim() && !defaultPromptInstruction.trim()) {
+    throw new Error("Add a prompt instruction on the Подключения tab before prompt generation.");
+  }
   return {
-    session: nextSession,
-    media: mediaWithKnownScenes.map((item) => {
-      const sceneId = item.sceneBibleId ?? nextSession.mediaSceneMap[item.id];
-      const sceneBible = item.sceneBible ?? (sceneId ? nextSceneById.get(sceneId) : undefined);
-      return sceneBible ? { ...item, sceneBibleId: sceneBible.id, sceneBible } : item;
-    })
+    provider,
+    apiKey: connections.ollamaCloudApiKey,
+    model,
+    instruction: connections.ollamaPromptInstruction?.trim() || defaultPromptInstruction
   };
 }
 
-function mergeSceneBibles(existing: SceneBible[], incoming: SceneBible[]): SceneBible[] {
-  const byId = new Map(existing.map((scene) => [scene.id, scene]));
-  for (const scene of incoming) {
-    byId.set(scene.id, scene);
+function resolvePromptMediaImagePath(imagePath: string): string {
+  const inputPrefix = "/input/";
+  if (!imagePath.startsWith(inputPrefix)) {
+    throw new Error("Selected media image must come from the local input folder.");
   }
-  return [...byId.values()];
-}
-
-async function generateSceneBiblesForPromptMedia(media: PromptMediaInput[]): Promise<Pick<CurrentMediaSession, "sceneBibles" | "mediaSceneMap">> {
-  if (media.length === 0) {
-    return { sceneBibles: [], mediaSceneMap: {} };
+  const resolvedPath = resolve(inputDir, imagePath.slice(inputPrefix.length));
+  const pathFromInput = relative(inputDir, resolvedPath);
+  if (pathFromInput.startsWith("..") || pathFromInput === "") {
+    throw new Error("Selected media image must stay inside the local input folder.");
   }
-
-  try {
-    return await generateSceneBiblesForImport({
-      inputDir,
-      model: defaultOllamaModel,
-      media,
-      onStatus: (event) => activityLog.publish(event)
-    });
-  } catch (error) {
-    activityLog.publish({
-      tone: "error",
-      source: "scene",
-      message: `Scene analysis failed: ${toErrorMessage(error)}. Using fallback scene bible.`
-    });
-    return createFallbackSceneData(media);
-  }
+  return resolvedPath;
 }
 
 function mapGeneratedAssetsToScenes(
@@ -401,61 +440,30 @@ function parsePromptMedia(value: unknown): PromptMediaInput[] {
     const imagePath = typeof record.imagePath === "string" ? record.imagePath : "";
     const sourceKind = record.sourceKind === "video-first-frame" ? "video-first-frame" : "photo";
     const caption = typeof record.caption === "string" ? record.caption : undefined;
-    const sceneBibleId = typeof record.sceneBibleId === "string" ? record.sceneBibleId : undefined;
-    const sceneBible = parseSceneBible(record.sceneBible);
 
     if (!id || !label || !imagePath) {
       throw new Error(`Prompt media item ${index + 1} must include id, label, and imagePath.`);
     }
 
-    return { id, label, imagePath, sourceKind, caption, sceneBibleId, sceneBible };
+    return { id, label, imagePath, sourceKind, caption };
   });
 }
 
-function parseSceneBible(value: unknown): SceneBible | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  const record = value as Partial<SceneBible>;
-  if (
-    typeof record.id !== "string" ||
-    typeof record.name !== "string" ||
-    !Array.isArray(record.sourceMediaIds) ||
-    !record.locationSignature ||
-    typeof record.locationSignature !== "object" ||
-    !record.lockedJson ||
-    typeof record.lockedJson !== "object"
-  ) {
-    return undefined;
-  }
-  return record as SceneBible;
-}
-
-function createRunningHubPromptJobs(media: PromptMediaInput[], prompt: string): RunningHubPromptJob[] {
-  if (media.length === 1) {
-    return [{
-      mediaId: media[0].id,
-      label: media[0].label,
-      prompt
-    }];
+function parseRunningHubPromptJobs(value: unknown): Array<{ media: PromptMediaInput; prompt: string }> {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("Image generation requires at least one media and prompt job.");
   }
 
-  const parsed = JSON.parse(prompt) as unknown;
-  if (!Array.isArray(parsed)) {
-    throw new Error("Expected a prompt array for multi-media image generation.");
-  }
-
-  return media.map((mediaItem, index) => {
-    const promptRecord = parsed[index];
-    if (!promptRecord || typeof promptRecord !== "object") {
-      throw new Error(`Missing generated prompt for ${mediaItem.label} (${index + 1}/${media.length}).`);
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object") {
+      throw new Error(`Image generation job ${index + 1} is invalid.`);
     }
-    const record = promptRecord as Record<string, unknown>;
-    const promptValue = record.prompt ?? promptRecord;
-    return {
-      mediaId: mediaItem.id,
-      label: mediaItem.label,
-      prompt: typeof promptValue === "string" ? promptValue : JSON.stringify(promptValue, null, 2)
-    };
+    const record = item as Record<string, unknown>;
+    const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
+    if (!prompt) {
+      throw new Error(`Image generation job ${index + 1} must include a non-empty prompt.`);
+    }
+    const [media] = parsePromptMedia([record.media]);
+    return { media, prompt };
   });
 }
