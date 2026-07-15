@@ -14,6 +14,7 @@ import {
   resetMediaSession,
   saveConnectionKey,
   saveConnections,
+  saveSessionPrompts,
   uploadLocalImage,
   type ConnectionKeyName,
   type PublicConnections
@@ -304,6 +305,8 @@ export default function App() {
       setIsMediaSessionReset(false);
       setSelectedMediaId(importedMedia[0]?.id ?? null);
       setSelectedForGeneration(importedMedia[0]?.id ? [importedMedia[0].id] : []);
+      setPromptDocuments([]);
+      setUrl("");
       recordStatus({ tone: "ready", message: "Local image uploaded." });
     } catch (error) { recordStatus({ tone: "error", message: toErrorMessage(error) }); } finally { setIsImporting(false); }
   }
@@ -365,6 +368,22 @@ export default function App() {
     }
   }
 
+  async function handleSavePrompt(mediaId: string) {
+    const document = promptDocuments.find((item) => item.mediaId === mediaId);
+    if (!document) {
+      return;
+    }
+
+    try {
+      const session = await saveSessionPrompts({ [mediaId]: getCurrentPrompt(document) });
+      setCurrentSession(session);
+      setSessionMediaItemIds(session.itemIds);
+      recordStatus({ tone: "ready", message: "Prompt saved locally." });
+    } catch (error) {
+      recordStatus({ tone: "error", message: toErrorMessage(error) });
+    }
+  }
+
   async function handleGenerateImages() {
     const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
     const promptByMediaId = new Map(promptDocuments.map((document) => [document.mediaId, document]));
@@ -386,6 +405,9 @@ export default function App() {
     setIsGeneratingImages(true);
     recordStatus({ tone: "running", message: "Sending the current edited prompts and source images to RunningHub." });
     try {
+      const savedSession = await saveSessionPrompts(Object.fromEntries(imageJobs.map((job) => [job.media.id, job.prompt])));
+      setCurrentSession(savedSession);
+      setSessionMediaItemIds(savedSession.itemIds);
       const generated = await generateImages(imageJobs);
       setItems((current) => [generated.item, ...current.filter((item) => item.id !== generated.item.id)]);
       const generatedMedia = createMediaMaterials(generated.item);
@@ -595,6 +617,7 @@ export default function App() {
                 isGeneratingImages={isGeneratingImages}
                 onGenerateImages={handleGenerateImages}
                 onGenerateImagePrompts={handleGenerateImagePrompts}
+                onSavePrompt={handleSavePrompt}
                 onSelectMaterial={(material) => {
                   setSelectedItemId(material.importItem.id);
                   setSelectedMediaId(material.id);
@@ -735,6 +758,7 @@ function Preview({
   isGeneratingImages,
   onGenerateImages,
   onGenerateImagePrompts,
+  onSavePrompt,
   onSelectMaterial,
   onToggleMaterial,
   promptDocuments,
@@ -752,6 +776,7 @@ function Preview({
   isGeneratingImages: boolean;
   onGenerateImages: () => void;
   onGenerateImagePrompts: () => void;
+  onSavePrompt: (mediaId: string) => void;
   onSelectMaterial: (material: MediaMaterial) => void;
   onToggleMaterial: (materialId: string) => void;
   promptDocuments: PromptDocument[];
@@ -808,7 +833,7 @@ function Preview({
               </div>
               <div>
                 <dt>Source</dt>
-                <dd><a href={importItem.sourceUrl} rel="noreferrer" target="_blank">Open Instagram link</a></dd>
+                <dd>{importItem.sourceUrl.startsWith("local://") ? "Локальное изображение — ссылка Instagram отсутствует" : <a href={importItem.sourceUrl} rel="noreferrer" target="_blank">Open Instagram link</a>}</dd>
               </div>
             </dl>
           </div>
@@ -832,6 +857,7 @@ function Preview({
         onEdit={(mediaId, value) => setPromptDocuments((current) => editPromptDocument(current, mediaId, value))}
         onRedo={(mediaId) => setPromptDocuments((current) => redoPromptDocument(current, mediaId))}
         onReset={(mediaId) => setPromptDocuments((current) => resetPromptDocument(current, mediaId))}
+        onSave={onSavePrompt}
         onUndo={(mediaId) => setPromptDocuments((current) => undoPromptDocument(current, mediaId))}
       />
     </div>
@@ -933,6 +959,7 @@ function PromptEditors({
   onEdit,
   onRedo,
   onReset,
+  onSave,
   onUndo
 }: {
   documents: PromptDocument[];
@@ -940,6 +967,7 @@ function PromptEditors({
   onEdit: (mediaId: string, value: string) => void;
   onRedo: (mediaId: string) => void;
   onReset: (mediaId: string) => void;
+  onSave: (mediaId: string) => void;
   onUndo: (mediaId: string) => void;
 }) {
   const materialById = new Map(materials.map((material) => [material.id, material]));
@@ -956,8 +984,9 @@ function PromptEditors({
             <strong>Промт: {materialById.get(document.mediaId)?.label ?? document.label}</strong>
             <div className="prompt-editor-actions">
               <button aria-label="Отменить изменение промта" disabled={document.historyIndex === 0} onClick={() => onUndo(document.mediaId)} type="button">↶</button>
-              <button aria-label="Повторить изменение промта" disabled={document.historyIndex === document.history.length - 1} onClick={() => onRedo(document.mediaId)} type="button">↷</button>
-              <button aria-label="Сбросить изменения промта" onClick={() => onReset(document.mediaId)} type="button">↺</button>
+               <button aria-label="Повторить изменение промта" disabled={document.historyIndex === document.history.length - 1} onClick={() => onRedo(document.mediaId)} type="button">↷</button>
+               <button aria-label="Сбросить изменения промта" onClick={() => onReset(document.mediaId)} type="button">↺</button>
+               <button onClick={() => onSave(document.mediaId)} type="button">Сохранить</button>
             </div>
           </div>
           <textarea rows={20} value={getCurrentPrompt(document)} onChange={(event) => onEdit(document.mediaId, event.target.value)} />

@@ -62,4 +62,13 @@ describe("studio preview layout", () => {
     expect(cssSource).not.toContain("--studio-stage-height");
     expect(cssSource).not.toContain("overflow-y: auto");
   });
+
+  it("offers explicit prompt saving and describes a local image source", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+
+    expect(appSource).toContain("saveSessionPrompts");
+    expect(appSource).toContain("onSave");
+    expect(appSource).toContain(">Сохранить</button>");
+    expect(appSource).toContain("Локальное изображение — ссылка Instagram отсутствует");
+  });
 });
