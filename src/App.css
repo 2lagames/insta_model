@@ -393,7 +393,47 @@ input {
   min-width: 0;
   display: flex;
   flex-direction: column;
+}
+
+.media-list {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-color: #c9c4ba #faf6ef;
+  scrollbar-width: thin;
+}
+
+.media-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.media-list::-webkit-scrollbar-track {
+  border-radius: 8px;
+  background: #faf6ef;
+}
+
+.media-list::-webkit-scrollbar-thumb {
+  border: 2px solid #faf6ef;
+  border-radius: 8px;
+  background: #c9c4ba;
+}
+
+.media-list::-webkit-scrollbar-thumb:hover {
+  background: #9f978b;
+}
+
+.media-selector > button {
+  height: 42px;
+  margin-top: 8px;
+  border: 1px solid #2c2a26;
+  border-radius: 8px;
+  background: #fffdf8;
+  color: #1d1c1a;
+  cursor: pointer;
 }
 
 .copy-log-button {
@@ -703,8 +743,9 @@ input {
 }
 
 .prompt-editors textarea {
-  min-height: 30rem;
+  height: calc(8 * 1.45em + 20px);
   line-height: 1.45;
+  overflow-y: auto;
   resize: vertical;
 }
 
@@ -786,14 +827,7 @@ input {
   }
 
   .media-selector {
-    height: auto;
-    max-height: none;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-  }
-
-  .media-selector .panel-label {
-    grid-column: 1 / -1;
+    height: clamp(420px, 68vh, 680px);
   }
 
   .log-panel {

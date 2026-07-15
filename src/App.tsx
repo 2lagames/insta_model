@@ -1040,19 +1040,22 @@ function MediaSelector({
 }) {
   return (
     <aside className="media-selector">
-      <div className="panel-label">Media <button onClick={onSelectAll} type="button">Выбрать все</button></div>
-      {materials.map((material) => (
-        <div className={["gallery-item", material.id === selected?.id ? "selected" : "", selectedForGeneration.includes(material.id) ? "queued" : ""].filter(Boolean).join(" ")} key={material.id}>
-          <button className="gallery-preview" onClick={() => onSelect(material)} type="button">
-            <GalleryThumb material={material} />
-            <span>{material.label}</span>
-          </button>
-          <label className="gallery-select">
-            <input checked={selectedForGeneration.includes(material.id)} onChange={() => onToggle(material.id)} type="checkbox" />
-            Use
-          </label>
-        </div>
-      ))}
+      <div className="panel-label">Media</div>
+      <div className="media-list">
+        {materials.map((material) => (
+          <div className={["gallery-item", material.id === selected?.id ? "selected" : "", selectedForGeneration.includes(material.id) ? "queued" : ""].filter(Boolean).join(" ")} key={material.id}>
+            <button className="gallery-preview" onClick={() => onSelect(material)} type="button">
+              <GalleryThumb material={material} />
+              <span>{material.label}</span>
+            </button>
+            <label className="gallery-select">
+              <input checked={selectedForGeneration.includes(material.id)} onChange={() => onToggle(material.id)} type="checkbox" />
+              Use
+            </label>
+          </div>
+        ))}
+      </div>
+      <button onClick={onSelectAll} type="button">Выбрать все</button>
     </aside>
   );
 }
@@ -1095,7 +1098,7 @@ function PromptEditors({
                <button disabled={isBusy} onClick={() => onSave(document.mediaId)} type="button">Сохранить</button>
             </div>
           </div>
-          <textarea disabled={isBusy} rows={20} value={getCurrentPrompt(document)} onChange={(event) => onEdit(document.mediaId, event.target.value)} />
+          <textarea disabled={isBusy} rows={8} value={getCurrentPrompt(document)} onChange={(event) => onEdit(document.mediaId, event.target.value)} />
         </article>
       ))}
     </section>

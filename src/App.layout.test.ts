@@ -46,7 +46,7 @@ describe("studio preview layout", () => {
     expect(cssSource).toContain("aspect-ratio: 9 / 16");
     expect(cssSource).toContain(".gallery-select");
     expect(cssSource).toContain(".media-selector");
-    expect(cssSource).toContain(".media-selector {\n  height: clamp(560px, 68vh, 780px);\n  min-width: 0;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;");
+    expect(cssSource).toContain(".media-selector {\n  height: clamp(560px, 68vh, 780px);\n  min-width: 0;\n  display: flex;\n  flex-direction: column;\n}");
     expect(cssSource).toContain("grid-template-columns: auto minmax(110px, 150px) minmax(200px, 0.75fr) minmax(180px, 0.5fr)");
     expect(cssSource).toContain(".prompt-editors textarea");
     expect(cssSource).toContain("height: clamp(560px, 68vh, 780px)");
@@ -61,7 +61,33 @@ describe("studio preview layout", () => {
     expect(cssSource).toContain(".info-content {\n  display: grid;\n  gap: 8px;");
     expect(cssSource).toContain("grid-auto-rows: 42px");
     expect(cssSource).not.toContain("--studio-stage-height");
-    expect(cssSource).not.toContain("overflow-y: auto");
+    expect(cssSource).toContain("overflow-y: auto");
+  });
+
+  it("bounds the Media card list separately from its select-all control", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const cssSource = readFileSync("src/App.css", "utf8");
+    const mediaSelectorStart = appSource.indexOf("function MediaSelector({");
+    const mediaSelector = appSource.slice(mediaSelectorStart, appSource.indexOf("function PromptEditors", mediaSelectorStart));
+
+    expect(mediaSelector).toContain('className="media-list"');
+    expect(mediaSelector).toContain(">Выбрать все</button>");
+    expect(mediaSelector.indexOf('className="media-list"')).toBeLessThan(mediaSelector.indexOf(">Выбрать все</button>"));
+    expect(cssSource).toContain(".media-list");
+    expect(cssSource).toContain(".media-list {\n  min-height: 0;\n  flex: 1;");
+    expect(cssSource).toContain(".media-list {\n  min-height: 0;\n  flex: 1;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  overflow-y: auto;");
+    expect(cssSource).toContain(".media-selector > button {\n  height: 42px;\n  margin-top: 8px;");
+  });
+
+  it("uses a scrollable eight-line prompt editor that users can expand", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const cssSource = readFileSync("src/App.css", "utf8");
+
+    expect(appSource).toContain("<textarea disabled={isBusy} rows={8}");
+    expect(cssSource).toContain(".prompt-editors textarea {\n  height: calc(8 * 1.45em + 20px);");
+    expect(cssSource).toContain("overflow-y: auto;");
+    expect(cssSource).toContain("resize: vertical;");
+    expect(cssSource).not.toContain(".prompt-editors textarea {\n  max-height:");
   });
 
   it("keeps the Studio workspace visible after the selected media is cleared", () => {
