@@ -9,8 +9,29 @@ import {
   listOllamaModels,
   listImports,
   resetMediaSession,
-  saveConnectionKey
+  saveConnectionKey,
+  uploadLocalImage
 } from "./api";
+
+describe("uploadLocalImage", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("posts the selected file directly to the local upload endpoint", async () => {
+    const file = new File(["image"], "reference.png", { type: "image/png" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      item: { id: "local-1", assets: [], files: {}, status: "ready", mediaType: "image", createdAt: "2026-07-15", sourceUrl: "local://reference.png" },
+      session: { itemIds: ["local-1"], sceneBibles: [], mediaSceneMap: {} }
+    })));
+
+    await uploadLocalImage(file);
+
+    expect(fetchSpy).toHaveBeenCalledWith("/api/imports/upload-image", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({ "Content-Type": "image/png", "X-File-Name": "reference.png" }),
+      body: file
+    }));
+  });
+});
 
 describe("generateImages", () => {
   afterEach(() => {

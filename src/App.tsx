@@ -14,6 +14,7 @@ import {
   resetMediaSession,
   saveConnectionKey,
   saveConnections,
+  uploadLocalImage,
   type ConnectionKeyName,
   type PublicConnections
 } from "./lib/api";
@@ -285,6 +286,23 @@ export default function App() {
     }
   }
 
+  async function handleLocalImageUpload(file: File | undefined) {
+    if (!file) return;
+    setIsImporting(true);
+    try {
+      const imported = await uploadLocalImage(file);
+      const importedMedia = createMediaMaterials(imported.item);
+      setCurrentSession(imported.session);
+      setItems((current) => [imported.item, ...current.filter((item) => item.id !== imported.item.id)]);
+      setSelectedItemId(imported.item.id);
+      setSessionMediaItemIds(imported.session.itemIds);
+      setIsMediaSessionReset(false);
+      setSelectedMediaId(importedMedia[0]?.id ?? null);
+      setSelectedForGeneration(importedMedia[0]?.id ? [importedMedia[0].id] : []);
+      recordStatus({ tone: "ready", message: "Local image uploaded." });
+    } catch (error) { recordStatus({ tone: "error", message: toErrorMessage(error) }); } finally { setIsImporting(false); }
+  }
+
   async function handleOpenFolder() {
     try {
       await openImportsFolder();
@@ -548,9 +566,10 @@ export default function App() {
             >
               Обновить заново
             </button>
-            <button className="secondary-button" disabled={isChecking || isImporting || !isBackendCurrent} onClick={handleCheckImport} type="button">
-              {isChecking ? "Checking" : "Check"}
-            </button>
+            <label className="secondary-button upload-image-button">
+              Загрузить изображение
+              <input accept="image/*" disabled={isImporting} onChange={(event) => void handleLocalImageUpload(event.target.files?.[0])} type="file" />
+            </label>
             <button className="secondary-button" onClick={handleOpenFolder} type="button">Open Folder</button>
           </section>
 
@@ -587,7 +606,7 @@ export default function App() {
       ) : (
         <section className="connections-page">
           <div className="panel-label">Подключения</div>
-          <div className="connection-card">
+          <div className="connection-card scrapecreators-card">
             <div>
               <h2>ScrapeCreators</h2>
               <KeyStatus hasKey={connections.hasScrapeCreatorsApiKey} preview={connections.scrapeCreatorsApiKeyPreview} />

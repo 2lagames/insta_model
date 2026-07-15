@@ -1,5 +1,5 @@
-import { mkdir, readFile } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, extname, join, relative, resolve } from "node:path";
 import express from "express";
 import type { ImportAsset, ImportItem } from "../src/lib/importTypes";
 import { validateInstagramUrl } from "../src/lib/instagramUrl";
@@ -49,6 +49,29 @@ app.get("/api/imports", async (_request, response) => {
       session,
       sessionItemIds: session.itemIds
     });
+  } catch (error) {
+    response.status(500).json({ error: toErrorMessage(error) });
+  }
+});
+
+app.post("/api/imports/upload-image", express.raw({ type: "image/*", limit: "25mb" }), async (request, response) => {
+  try {
+    if (!request.is("image/*") || !Buffer.isBuffer(request.body) || request.body.length === 0) {
+      response.status(400).json({ error: "Choose a non-empty image file." });
+      return;
+    }
+    const fileName = basename(String(request.header("X-File-Name") ?? "image"));
+    const extension = extname(fileName) || imageExtension(request.header("Content-Type") ?? "");
+    const id = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const folder = join(inputDir, "local", formatDateFolder(new Date()));
+    await mkdir(folder, { recursive: true });
+    const path = join(folder, `${id}${extension || ".png"}`);
+    await writeFile(path, request.body);
+    const imagePath = `/input/${relative(inputDir, path).replaceAll("\\", "/")}`;
+    const item: ImportItem = { id, sourceUrl: `local://${fileName}`, mediaType: "image", status: "ready", createdAt: new Date().toISOString(), title: fileName, provider: "scrapecreators", files: { image: imagePath }, assets: [{ id: "image", mediaType: "image", files: { image: imagePath } }] };
+    await store.saveItem(item);
+    await store.startCurrentSession(item.id);
+    response.json({ item, session: await store.readCurrentSession(), reused: false });
   } catch (error) {
     response.status(500).json({ error: toErrorMessage(error) });
   }
@@ -351,6 +374,14 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
+}
+
+function formatDateFolder(date: Date): string {
+  return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function imageExtension(contentType: string): string {
+  return contentType === "image/jpeg" ? ".jpg" : contentType === "image/webp" ? ".webp" : contentType === "image/gif" ? ".gif" : ".png";
 }
 
 function optionalString(value: unknown): string | undefined {

@@ -213,6 +213,24 @@ export async function importInstagramUrl(
   };
 }
 
+export async function uploadLocalImage(file: File): Promise<ImportInstagramResult> {
+  const response = await apiFetch("/api/imports/upload-image", {
+    method: "POST",
+    headers: {
+      "Content-Type": file.type || "application/octet-stream",
+      "X-File-Name": file.name
+    },
+    body: file
+  });
+  await assertOk(response);
+  const data = await response.json() as ImportResponse;
+  return {
+    item: data.item,
+    session: data.session ?? createEmptySession([data.item.id]),
+    reused: false
+  };
+}
+
 export async function cleanupDuplicateImports(): Promise<CleanupImportsResult> {
   const response = await apiFetch("/api/imports/cleanup", { method: "POST" });
   await assertOk(response);
