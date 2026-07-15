@@ -50,4 +50,15 @@ describe("studio preview layout", () => {
     expect(cssSource).toContain(".prompt-editors textarea");
     expect(cssSource).toContain("height: clamp(560px, 68vh, 780px)");
   });
+
+  it("uses one content height and consistent spacing for every studio column", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const cssSource = readFileSync("src/App.css", "utf8");
+
+    expect(appSource).toContain('className="info-content"');
+    expect(cssSource).toContain("--studio-stage-height: clamp(560px, 68vh, 780px)");
+    expect(cssSource).toContain("grid-template-rows: auto var(--studio-stage-height)");
+    expect(cssSource).toContain("height: var(--studio-stage-height)");
+    expect(cssSource).toContain("justify-content: space-between");
+  });
 });

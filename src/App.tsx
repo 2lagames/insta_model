@@ -784,6 +784,7 @@ function Preview({
         </div>
         <MediaSelector materials={materials} onSelect={onSelectMaterial} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
         <aside className="preview-details"><div className="panel-label">Info</div>
+          <div className="info-content">
             <section className="caption-panel">
               <div className="panel-label">Text</div>
               <div className="caption-text">{importItem.caption || "No caption text returned for this media."}</div>
@@ -810,6 +811,7 @@ function Preview({
                 <dd><a href={importItem.sourceUrl} rel="noreferrer" target="_blank">Open Instagram link</a></dd>
               </div>
             </dl>
+          </div>
         </aside>
         <GenerationWorkspace
           generationPrefixOptions={generationPrefixOptions}
