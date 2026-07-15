@@ -176,6 +176,7 @@ export default function App() {
       .then((loadedSession) => {
         setItems(loadedSession.items);
         setCurrentSession(loadedSession.session);
+        setPromptDocuments(mergePromptDocuments([], Object.entries(loadedSession.session.promptTexts ?? {}).map(([mediaId, prompt]) => ({ mediaId, label: mediaId, prompt }))));
         const sessionItemIds = loadedSession.session.itemIds;
         const firstSessionItem = sessionItemIds.length > 0
           ? loadedSession.items.find((item) => item.id === sessionItemIds[0])
@@ -769,8 +770,8 @@ function Preview({
 
   return (
     <div className="preview-content">
-      <div className="preview-label-row"><div className="panel-label">Preview</div><div className="panel-label">Media</div><div className="panel-label">Info</div><div className="panel-label">Generation workspace</div></div>
       <div className="preview-main">
+        <div className="preview-column"><div className="panel-label">Preview</div>
         <div className="media-stage">
           {selected.files.video ? (
             <video controls poster={selected.files.firstFrame ?? selected.files.thumbnail} src={selected.files.video} />
@@ -780,8 +781,9 @@ function Preview({
             <div className="preview-empty">No preview file was generated for this import.</div>
           )}
         </div>
+        </div>
         <MediaSelector materials={materials} onSelect={onSelectMaterial} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
-        <aside className="preview-details">
+        <aside className="preview-details"><div className="panel-label">Info</div>
             <section className="caption-panel">
               <div className="panel-label">Text</div>
               <div className="caption-text">{importItem.caption || "No caption text returned for this media."}</div>
@@ -869,6 +871,7 @@ function GenerationWorkspace({
 
   return (
     <aside className="generation-panel">
+      <div className="panel-label">Generation workspace</div>
       <div className="generation-prefix-control"><select onChange={(event) => onChangePrefix(event.target.value)} value={generationPrefixSelection}><option value="">Не выбрано</option>{parseGenerationPrefixes(generationPrefixOptions).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select><button aria-label="Редактировать варианты промта" onClick={onEditPrefixes} type="button">✎</button></div>
       <button
         disabled={isBusy || selectedForGenerationCount === 0}
@@ -906,6 +909,7 @@ function MediaSelector({
 }) {
   return (
     <aside className="media-selector">
+      <div className="panel-label">Media</div>
       {materials.map((material) => (
         <div className={["gallery-item", material.id === selected?.id ? "selected" : "", selectedForGeneration.includes(material.id) ? "queued" : ""].filter(Boolean).join(" ")} key={material.id}>
           <button className="gallery-preview" onClick={() => onSelect(material)} type="button">

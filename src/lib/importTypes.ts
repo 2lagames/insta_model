@@ -78,6 +78,7 @@ export type CurrentMediaSession = {
   itemIds: string[];
   sceneBibles: SceneBible[];
   mediaSceneMap: Record<string, string>;
+  promptTexts?: Record<string, string>;
 };
 
 export type ImportIndex = {

@@ -5,7 +5,8 @@ import type { CurrentMediaSession, ImportIndex, ImportItem } from "../src/lib/im
 const emptyCurrentSession: CurrentMediaSession = {
   itemIds: [],
   sceneBibles: [],
-  mediaSceneMap: {}
+  mediaSceneMap: {},
+  promptTexts: {}
 };
 
 export class ImportStore {
@@ -245,6 +246,7 @@ export function normalizeCurrentSession(index: ImportIndex): CurrentMediaSession
     itemIds: index.currentSession?.itemIds ?? index.currentSessionItemIds ?? [],
     sceneBibles: index.currentSession?.sceneBibles ?? [],
     mediaSceneMap: index.currentSession?.mediaSceneMap ?? {}
+    ,promptTexts: index.currentSession?.promptTexts ?? {}
   };
 }
 

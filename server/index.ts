@@ -303,7 +303,9 @@ app.post("/api/generation/image-prompts", async (request, response) => {
         message: generatedPrompt.prompt
       });
     }
-    const session = await store.readCurrentSession();
+    const currentSession = await store.readCurrentSession();
+    const session = { ...currentSession, promptTexts: { ...(currentSession.promptTexts ?? {}), ...Object.fromEntries(prompts.map((item) => [item.mediaId, item.prompt])) } };
+    await store.writeCurrentSession(session);
     response.json({ prompts, session });
   } catch (error) {
     activityLog.publish({ tone: "error", source: "prompt", message: toErrorMessage(error) });
