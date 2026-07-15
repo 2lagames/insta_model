@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ConnectionsStore } from "./connectionsStore";
-import { defaultPromptInstruction } from "./ideogramPrompt";
 
 let tempDir: string;
 
@@ -16,13 +15,13 @@ afterEach(async () => {
 });
 
 describe("ConnectionsStore", () => {
-  it("returns no public key data when the local file is missing", async () => {
+  it("returns an empty Ollama prompt instruction when the local file is missing", async () => {
     const store = new ConnectionsStore(tempDir);
 
     await expect(store.readPublic()).resolves.toEqual({
       hasScrapeCreatorsApiKey: false,
       hasOllamaCloudApiKey: false,
-      ollamaPromptInstruction: defaultPromptInstruction,
+      ollamaPromptInstruction: "",
       hasRunningHubApiKey: false
     });
   });
@@ -39,7 +38,7 @@ describe("ConnectionsStore", () => {
       hasScrapeCreatorsApiKey: true,
       scrapeCreatorsApiKeyPreview: "******************************7890",
       hasOllamaCloudApiKey: false,
-      ollamaPromptInstruction: defaultPromptInstruction,
+      ollamaPromptInstruction: "",
       hasRunningHubApiKey: false
     });
 
@@ -79,7 +78,7 @@ describe("ConnectionsStore", () => {
       hasScrapeCreatorsApiKey: true,
       scrapeCreatorsApiKeyPreview: "******************************7890",
       hasOllamaCloudApiKey: false,
-      ollamaPromptInstruction: defaultPromptInstruction,
+      ollamaPromptInstruction: "",
       hasRunningHubApiKey: true,
       runningHubApiKeyPreview: "**********************7890",
       runningHubWorkflowId: "1904136902449209346",
@@ -198,7 +197,7 @@ describe("ConnectionsStore", () => {
     });
   });
 
-  it("preserves an explicitly cleared prompt instruction instead of replacing it with the default", async () => {
+  it("preserves an explicitly cleared prompt instruction", async () => {
     const store = new ConnectionsStore(tempDir);
 
     await store.save({ ollamaPromptInstruction: "" });
