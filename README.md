@@ -31,6 +31,8 @@ Double-click the launcher for your operating system:
 
 The launcher opens a terminal window, installs npm dependencies on the first run, then opens the project in the default browser at <http://localhost:5173>. Leave that terminal window open while working. Closing it stops the local server.
 
+Starting a launcher again stops the previous local application listeners on ports 4317 and 5173 before opening the new session. Processes using other ports are not stopped.
+
 Both launchers show a clear message if Node.js/npm is missing. Install the current LTS version from <https://nodejs.org/>, then run the launcher again.
 
 ## Update

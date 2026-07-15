@@ -128,6 +128,7 @@ describe("cross-platform launchers", () => {
     expect(readme).toContain("start.bat");
     expect(readme).toContain("start.command");
     expect(readme).toContain("http://localhost:5173");
+    expect(readme).toContain("ports 4317 and 5173");
     expect(macosInfo.mode & 0o111).not.toBe(0);
   });
 
