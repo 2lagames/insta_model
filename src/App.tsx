@@ -107,6 +107,7 @@ export default function App() {
   const promptAutosaveRevisionRef = useRef(0);
   const isPromptAutosaveReadyRef = useRef(false);
   const localImageInputRef = useRef<HTMLInputElement | null>(null);
+  const isSessionMutationBusy = isImporting || isGeneratingPrompt || isGeneratingImages;
 
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedItemId) ?? (isMediaSessionReset ? undefined : items[0]),
@@ -254,6 +255,10 @@ export default function App() {
   }, [promptDocuments]);
 
   async function handleImport(forceRefresh = false) {
+    if (isSessionMutationBusy) {
+      return;
+    }
+
     if (!isBackendCurrent) {
       recordStatus({
         tone: "error",
@@ -332,7 +337,7 @@ export default function App() {
   }
 
   async function handleLocalImageUpload(files: FileList | null) {
-    if (!files?.length) return;
+    if (!files?.length || isSessionMutationBusy) return;
 
     promptAutosaveRevisionRef.current += 1;
     setIsImporting(true);
@@ -381,6 +386,10 @@ export default function App() {
   }
 
   async function handleResetMediaSession() {
+    if (isSessionMutationBusy) {
+      return;
+    }
+
     promptAutosaveRevisionRef.current += 1;
     try {
       const resetSession = await resetMediaSession();
@@ -438,6 +447,10 @@ export default function App() {
   }
 
   async function handleGenerateImagePrompts() {
+    if (isSessionMutationBusy) {
+      return;
+    }
+
     const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
     if (selectedPromptMedia.length === 0) {
       recordStatus({ tone: "error", message: "Select one or more Media items before prompt generation." });
@@ -495,6 +508,10 @@ export default function App() {
   }
 
   async function handleGenerateImages() {
+    if (isSessionMutationBusy) {
+      return;
+    }
+
     const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
     if (selectedPromptMedia.length === 0) {
       recordStatus({ tone: "error", message: "Select one or more Media items before image generation." });
@@ -660,7 +677,7 @@ export default function App() {
         {activeTab === "studio" ? (
           <button
             className="reset-session-button"
-            disabled={isImporting || isGeneratingPrompt || isGeneratingImages}
+            disabled={isSessionMutationBusy}
             onClick={handleResetMediaSession}
             type="button"
           >
@@ -674,12 +691,13 @@ export default function App() {
           <section className="top-bar">
             <input
               className="url-input"
+              disabled={isSessionMutationBusy}
               onChange={(event) => {
                 setUrlNotice(null);
                 setUrl(event.target.value);
               }}
               onKeyDown={(event) => {
-                if (event.key === "Enter" && !isImporting) {
+                if (event.key === "Enter" && !isSessionMutationBusy) {
                   void handleImport();
                 }
               }}
@@ -688,7 +706,7 @@ export default function App() {
             />
             <button
               className="primary-button"
-              disabled={isImporting || !isBackendCurrent}
+              disabled={isSessionMutationBusy || !isBackendCurrent}
               onClick={() => void handleImport()}
               type="button"
             >
@@ -696,7 +714,7 @@ export default function App() {
             </button>
             <button
               className="secondary-button"
-              disabled={isImporting || !isBackendCurrent}
+              disabled={isSessionMutationBusy || !isBackendCurrent}
               onClick={() => void handleImport(true)}
               type="button"
             >
@@ -704,7 +722,7 @@ export default function App() {
             </button>
             <label className="secondary-button upload-image-button">
               Загрузить изображение
-              <input accept="image/*" disabled={isImporting} multiple onChange={(event) => void handleLocalImageUpload(event.target.files)} ref={localImageInputRef} type="file" />
+              <input accept="image/*" disabled={isSessionMutationBusy} multiple onChange={(event) => void handleLocalImageUpload(event.target.files)} ref={localImageInputRef} type="file" />
             </label>
             <button className="secondary-button" onClick={handleOpenFolder} type="button">Open Folder</button>
           </section>
@@ -716,6 +734,7 @@ export default function App() {
                 generationPrefixSelection={generationPrefixSelection}
                 onChangePrefix={setGenerationPrefixSelection}
                 onEditPrefixes={() => setIsEditingGenerationPrefixes(true)}
+                isSessionMutationBusy={isSessionMutationBusy}
                 isGeneratingPrompt={isGeneratingPrompt}
                 isGeneratingImages={isGeneratingImages}
                 onGenerateImages={handleGenerateImages}
@@ -860,6 +879,7 @@ function Preview({
   generationPrefixSelection,
   onChangePrefix,
   onEditPrefixes,
+  isSessionMutationBusy,
   isGeneratingPrompt,
   isGeneratingImages,
   onGenerateImages,
@@ -879,6 +899,7 @@ function Preview({
   generationPrefixSelection: string;
   onChangePrefix: (value: string) => void;
   onEditPrefixes: () => void;
+  isSessionMutationBusy: boolean;
   isGeneratingPrompt: boolean;
   isGeneratingImages: boolean;
   onGenerateImages: () => void;
@@ -950,6 +971,7 @@ function Preview({
           generationPrefixSelection={generationPrefixSelection}
           onChangePrefix={onChangePrefix}
           onEditPrefixes={onEditPrefixes}
+          isSessionMutationBusy={isSessionMutationBusy}
           isGeneratingImages={isGeneratingImages}
           isGeneratingPrompt={isGeneratingPrompt}
           onGenerateImages={onGenerateImages}
@@ -984,6 +1006,7 @@ function GenerationWorkspace({
   generationPrefixSelection,
   onChangePrefix,
   onEditPrefixes,
+  isSessionMutationBusy,
   isGeneratingImages,
   isGeneratingPrompt,
   onGenerateImages,
@@ -994,26 +1017,25 @@ function GenerationWorkspace({
   generationPrefixSelection: string;
   onChangePrefix: (value: string) => void;
   onEditPrefixes: () => void;
+  isSessionMutationBusy: boolean;
   isGeneratingImages: boolean;
   isGeneratingPrompt: boolean;
   onGenerateImages: () => void;
   onGenerateImagePrompts: () => void;
   selectedForGenerationCount: number;
 }) {
-  const isBusy = isGeneratingPrompt || isGeneratingImages;
-
   return (
     <div className="generation-column"><div className="panel-label">Generation workspace</div><aside className="generation-panel">
       <div className="generation-prefix-control"><select onChange={(event) => onChangePrefix(event.target.value)} value={generationPrefixSelection}><option value="">Не выбрано</option>{parseGenerationPrefixes(generationPrefixOptions).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select><button aria-label="Редактировать варианты промта" onClick={onEditPrefixes} type="button">✎</button></div>
       <button
-        disabled={isBusy || selectedForGenerationCount === 0}
+        disabled={isSessionMutationBusy || selectedForGenerationCount === 0}
         onClick={onGenerateImagePrompts}
         type="button"
       >
         {isGeneratingPrompt ? "Generating" : `Generate prompt (${selectedForGenerationCount})`}
       </button>
       <button
-        disabled={isBusy}
+        disabled={isSessionMutationBusy}
         onClick={onGenerateImages}
         type="button"
       >

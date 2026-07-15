@@ -186,4 +186,23 @@ describe("studio preview layout", () => {
     expect(promptEditors).toContain("disabled={isBusy || document.historyIndex === document.history.length - 1}");
     expect(promptEditors).toContain("disabled={isBusy}");
   });
+
+  it("serializes imports, local uploads, and generation session mutations", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const controlsStart = appSource.indexOf('<section className="top-bar">');
+    const controls = appSource.slice(controlsStart, appSource.indexOf('<section className="workspace">', controlsStart));
+    const previewStart = appSource.indexOf("function Preview({");
+    const preview = appSource.slice(previewStart, appSource.indexOf("function parseGenerationPrefixes", previewStart));
+    const generationWorkspaceStart = appSource.indexOf("function GenerationWorkspace({");
+    const generationWorkspace = appSource.slice(generationWorkspaceStart, appSource.indexOf("function MediaSelector", generationWorkspaceStart));
+
+    expect(appSource).toContain("const isSessionMutationBusy = isImporting || isGeneratingPrompt || isGeneratingImages;");
+    expect(controls).toContain("disabled={isSessionMutationBusy}");
+    expect(controls).toContain("disabled={isSessionMutationBusy || !isBackendCurrent}");
+    expect(controls).toContain('event.key === "Enter" && !isSessionMutationBusy');
+    expect(preview).toContain("isSessionMutationBusy={isSessionMutationBusy}");
+    expect(generationWorkspace).toContain("isSessionMutationBusy: boolean;");
+    expect(generationWorkspace).toContain("disabled={isSessionMutationBusy || selectedForGenerationCount === 0}");
+    expect(generationWorkspace).toContain("disabled={isSessionMutationBusy}");
+  });
 });
