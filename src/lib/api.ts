@@ -207,12 +207,16 @@ export async function importInstagramUrl(
   };
 }
 
-export async function uploadLocalImage(file: File): Promise<ImportInstagramResult> {
+export async function uploadLocalImage(
+  file: File,
+  options: { appendToSession?: boolean } = {}
+): Promise<ImportInstagramResult> {
   const response = await apiFetch("/api/imports/upload-image", {
     method: "POST",
     headers: {
       "Content-Type": file.type || "application/octet-stream",
-      "X-File-Name": encodeURIComponent(file.name)
+      "X-File-Name": encodeURIComponent(file.name),
+      ...(options.appendToSession ? { "X-Append-To-Session": "true" } : {})
     },
     body: file
   });

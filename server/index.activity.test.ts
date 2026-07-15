@@ -2,6 +2,16 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("image prompt activity", () => {
+  it("appends later local uploads to the current media session", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+    const uploadRouteStart = source.indexOf('app.post("/api/imports/upload-image"');
+    const uploadRoute = source.slice(uploadRouteStart, source.indexOf('app.get("/api/connections"', uploadRouteStart));
+
+    expect(uploadRoute).toContain('request.get("X-Append-To-Session") === "true"');
+    expect(uploadRoute).toContain("store.appendToCurrentSession(item.id)");
+    expect(uploadRoute).toContain("store.startCurrentSession(item.id)");
+  });
+
   it("publishes each generated prompt into the activity log", () => {
     const source = readFileSync("server/index.ts", "utf8");
 

@@ -90,7 +90,9 @@ app.post("/api/imports/upload-image", express.raw({ type: "image/*", limit: "25m
     const imagePath = `/input/${relative(inputDir, path).replaceAll("\\", "/")}`;
     const item: ImportItem = { id, sourceUrl: `local://${fileName}`, mediaType: "image", status: "ready", createdAt: new Date().toISOString(), title: fileName, provider: "scrapecreators", files: { image: imagePath }, assets: [{ id: "image", mediaType: "image", files: { image: imagePath } }] };
     await store.saveItem(item);
-    await store.startCurrentSession(item.id);
+    const appendToSession = request.get("X-Append-To-Session") === "true";
+    if (appendToSession) await store.appendToCurrentSession(item.id);
+    else await store.startCurrentSession(item.id);
     response.json({ item, session: await store.readCurrentSession(), reused: false });
   } catch (error) {
     response.status(500).json({ error: toErrorMessage(error) });

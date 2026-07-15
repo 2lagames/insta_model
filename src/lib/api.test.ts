@@ -31,6 +31,20 @@ describe("uploadLocalImage", () => {
       body: file
     }));
   });
+
+  it("marks later files in a local selection to append to the current session", async () => {
+    const file = new File(["image"], "second.png", { type: "image/png" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      item: { id: "local-2", assets: [], files: {}, status: "ready", mediaType: "image", createdAt: "2026-07-15", sourceUrl: "local://second.png" },
+      session: { itemIds: ["local-1", "local-2"], sceneBibles: [], mediaSceneMap: {} }
+    })));
+
+    await uploadLocalImage(file, { appendToSession: true });
+
+    expect(fetchSpy).toHaveBeenCalledWith("/api/imports/upload-image", expect.objectContaining({
+      headers: expect.objectContaining({ "X-Append-To-Session": "true" })
+    }));
+  });
 });
 
 describe("generateImages", () => {
