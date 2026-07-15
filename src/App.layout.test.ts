@@ -72,4 +72,13 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("Локальное изображение — ссылка Instagram отсутствует");
     expect(appSource).toContain("urlNotice");
   });
+
+  it("edits generation prefixes in a multiline application dialog", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+
+    expect(appSource).toContain("function GenerationPrefixDialog");
+    expect(appSource).toContain("Название;Текст — одна строка на вариант");
+    expect(appSource).not.toContain("window.prompt");
+    expect(appSource.indexOf("<GenerationPrefixDialog")).toBeLessThan(appSource.indexOf("<LogPanel"));
+  });
 });

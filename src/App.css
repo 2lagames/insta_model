@@ -737,6 +737,24 @@ input {
   height: 44px;
 }
 
+.generation-prefix-dialog p {
+  margin: -4px 0 0;
+  color: #6c6257;
+  font-size: 14px;
+}
+
+.generation-prefix-dialog textarea {
+  width: 100%;
+  min-height: 260px;
+  border: 1px solid #c9c4ba;
+  border-radius: 8px;
+  padding: 10px 12px;
+  resize: vertical;
+  background: #fffdf8;
+  color: #161616;
+  font: inherit;
+}
+
 .save-connections-button {
   justify-self: start;
   min-width: 132px;

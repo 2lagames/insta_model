@@ -98,6 +98,7 @@ export default function App() {
   const [ollamaPromptInstruction, setOllamaPromptInstruction] = useState("");
   const [generationPrefixOptions, setGenerationPrefixOptions] = useState("");
   const [generationPrefixSelection, setGenerationPrefixSelection] = useState("");
+  const [isEditingGenerationPrefixes, setIsEditingGenerationPrefixes] = useState(false);
   const [cloudModels, setCloudModels] = useState<string[]>([]);
   const [localModels, setLocalModels] = useState<string[]>([]);
   const [isRefreshingCloudModels, setIsRefreshingCloudModels] = useState(false);
@@ -389,6 +390,26 @@ export default function App() {
     }
   }
 
+  async function handleSaveGenerationPrefixes(value: string) {
+    const nextSelection = parseGenerationPrefixes(value).some((item) => item.name === generationPrefixSelection)
+      ? generationPrefixSelection
+      : "";
+
+    try {
+      const saved = await saveConnections({
+        generationPrefixOptions: value,
+        generationPrefixSelection: nextSelection
+      });
+      setConnections(saved);
+      setGenerationPrefixOptions(value);
+      setGenerationPrefixSelection(nextSelection);
+      setIsEditingGenerationPrefixes(false);
+      recordStatus({ tone: "ready", message: "Generation prefix options saved locally." });
+    } catch (error) {
+      recordStatus({ tone: "error", message: toErrorMessage(error) });
+    }
+  }
+
   async function handleGenerateImages() {
     const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
     const promptByMediaId = new Map(promptDocuments.map((document) => [document.mediaId, document]));
@@ -617,10 +638,7 @@ export default function App() {
                 generationPrefixOptions={generationPrefixOptions}
                 generationPrefixSelection={generationPrefixSelection}
                 onChangePrefix={setGenerationPrefixSelection}
-                onEditPrefixes={() => {
-                  const value = window.prompt("Название;Текст — одна строка на вариант", generationPrefixOptions);
-                  if (value !== null) setGenerationPrefixOptions(value);
-                }}
+                onEditPrefixes={() => setIsEditingGenerationPrefixes(true)}
                 isGeneratingPrompt={isGeneratingPrompt}
                 isGeneratingImages={isGeneratingImages}
                 onGenerateImages={handleGenerateImages}
@@ -640,6 +658,8 @@ export default function App() {
               />
             </section>
           </section>
+
+          {isEditingGenerationPrefixes ? <GenerationPrefixDialog onClose={() => setIsEditingGenerationPrefixes(false)} onSave={handleSaveGenerationPrefixes} savedValue={generationPrefixOptions} /> : null}
 
           <LogPanel
             copyState={copyState}
@@ -1031,6 +1051,36 @@ function KeyEditDialog({
         <h2>{integration}: API key</h2>
         <input autoFocus onChange={(event) => setValue(event.target.value)} type="text" value={value} />
         <div className="key-actions"><button onClick={() => onSave(value)} type="button">Сохранить</button><button onClick={onClose} type="button">Отмена</button></div>
+      </section>
+    </div>
+  );
+}
+
+function GenerationPrefixDialog({
+  savedValue,
+  onSave,
+  onClose
+}: {
+  savedValue: string;
+  onSave: (value: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(savedValue);
+  const [isSaving, setIsSaving] = useState(false);
+
+  async function handleSave() {
+    setIsSaving(true);
+    await onSave(value);
+    setIsSaving(false);
+  }
+
+  return (
+    <div className="key-dialog-backdrop" role="presentation">
+      <section aria-label="Варианты подстановки" className="key-dialog generation-prefix-dialog" role="dialog" aria-modal="true">
+        <h2>Варианты подстановки</h2>
+        <p>Название;Текст — одна строка на вариант</p>
+        <textarea autoFocus onChange={(event) => setValue(event.target.value)} rows={12} value={value} />
+        <div className="key-actions"><button disabled={isSaving} onClick={() => void handleSave()} type="button">Сохранить</button><button disabled={isSaving} onClick={onClose} type="button">Отмена</button></div>
       </section>
     </div>
   );
