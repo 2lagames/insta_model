@@ -75,6 +75,8 @@ export default function App() {
   }]);
   const [isImporting, setIsImporting] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [isSavingPrompt, setIsSavingPrompt] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [isBackendCurrent, setIsBackendCurrent] = useState(true);
@@ -107,7 +109,21 @@ export default function App() {
   const promptAutosaveRevisionRef = useRef(0);
   const isPromptAutosaveReadyRef = useRef(false);
   const localImageInputRef = useRef<HTMLInputElement | null>(null);
-  const isSessionMutationBusy = isImporting || isGeneratingPrompt || isGeneratingImages;
+  const isSessionMutationBusyRef = useRef(false);
+  const isSessionMutationBusy = isImporting || isResetting || isSavingPrompt || isGeneratingPrompt || isGeneratingImages;
+
+  function tryBeginSessionMutation() {
+    if (isSessionMutationBusyRef.current) {
+      return false;
+    }
+
+    isSessionMutationBusyRef.current = true;
+    return true;
+  }
+
+  function endSessionMutation() {
+    isSessionMutationBusyRef.current = false;
+  }
 
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedItemId) ?? (isMediaSessionReset ? undefined : items[0]),
@@ -255,10 +271,6 @@ export default function App() {
   }, [promptDocuments]);
 
   async function handleImport(forceRefresh = false) {
-    if (isSessionMutationBusy) {
-      return;
-    }
-
     if (!isBackendCurrent) {
       recordStatus({
         tone: "error",
@@ -270,6 +282,10 @@ export default function App() {
     const validation = validateInstagramUrl(url);
     if (!validation.ok) {
       recordStatus({ tone: "error", message: validation.message });
+      return;
+    }
+
+    if (!tryBeginSessionMutation()) {
       return;
     }
 
@@ -309,6 +325,7 @@ export default function App() {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
     } finally {
       setIsImporting(false);
+      endSessionMutation();
     }
   }
 
@@ -337,7 +354,7 @@ export default function App() {
   }
 
   async function handleLocalImageUpload(files: FileList | null) {
-    if (!files?.length || isSessionMutationBusy) return;
+    if (!files?.length || !tryBeginSessionMutation()) return;
 
     promptAutosaveRevisionRef.current += 1;
     setIsImporting(true);
@@ -373,6 +390,7 @@ export default function App() {
         localImageInputRef.current.value = "";
       }
       setIsImporting(false);
+      endSessionMutation();
     }
   }
 
@@ -386,11 +404,12 @@ export default function App() {
   }
 
   async function handleResetMediaSession() {
-    if (isSessionMutationBusy) {
+    if (!tryBeginSessionMutation()) {
       return;
     }
 
     promptAutosaveRevisionRef.current += 1;
+    setIsResetting(true);
     try {
       const resetSession = await resetMediaSession();
       isPromptAutosaveReadyRef.current = true;
@@ -405,6 +424,9 @@ export default function App() {
       setUrlNotice(null);
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
+    } finally {
+      setIsResetting(false);
+      endSessionMutation();
     }
   }
 
@@ -447,13 +469,13 @@ export default function App() {
   }
 
   async function handleGenerateImagePrompts() {
-    if (isSessionMutationBusy) {
-      return;
-    }
-
     const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
     if (selectedPromptMedia.length === 0) {
       recordStatus({ tone: "error", message: "Select one or more Media items before prompt generation." });
+      return;
+    }
+
+    if (!tryBeginSessionMutation()) {
       return;
     }
 
@@ -468,6 +490,7 @@ export default function App() {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
     } finally {
       setIsGeneratingPrompt(false);
+      endSessionMutation();
     }
   }
 
@@ -477,6 +500,11 @@ export default function App() {
       return;
     }
 
+    if (!tryBeginSessionMutation()) {
+      return;
+    }
+
+    setIsSavingPrompt(true);
     try {
       const session = await saveSessionPrompts({ [mediaId]: getCurrentPrompt(document) });
       setCurrentSession(session);
@@ -484,6 +512,9 @@ export default function App() {
       recordStatus({ tone: "ready", message: "Prompt saved locally." });
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
+    } finally {
+      setIsSavingPrompt(false);
+      endSessionMutation();
     }
   }
 
@@ -508,13 +539,13 @@ export default function App() {
   }
 
   async function handleGenerateImages() {
-    if (isSessionMutationBusy) {
-      return;
-    }
-
     const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
     if (selectedPromptMedia.length === 0) {
       recordStatus({ tone: "error", message: "Select one or more Media items before image generation." });
+      return;
+    }
+
+    if (!tryBeginSessionMutation()) {
       return;
     }
 
@@ -541,6 +572,7 @@ export default function App() {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
     } finally {
       setIsGeneratingImages(false);
+      endSessionMutation();
     }
   }
 
@@ -981,7 +1013,7 @@ function Preview({
       </div>
       <PromptEditors
         documents={promptDocuments.filter((document) => selectedForGeneration.includes(document.mediaId))}
-        isBusy={isGeneratingPrompt || isGeneratingImages}
+        isBusy={isSessionMutationBusy}
         materials={materials.filter((material) => selectedForGeneration.includes(material.id))}
         onEdit={(mediaId, value) => setPromptDocuments((current) => editPromptDocument(current, mediaId, value))}
         onRedo={(mediaId) => setPromptDocuments((current) => redoPromptDocument(current, mediaId))}

@@ -175,19 +175,19 @@ describe("studio preview layout", () => {
     expect(uploadHandler.indexOf("setCurrentSession(imported.session)")).toBeLessThan(uploadHandler.indexOf("} catch"));
   });
 
-  it("locks prompt editors while prompt or image generation is running", () => {
+  it("locks prompt editors while any persistent session mutation is running", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const promptEditorsStart = appSource.indexOf("function PromptEditors({");
     const promptEditors = appSource.slice(promptEditorsStart);
 
-    expect(appSource).toContain("isBusy={isGeneratingPrompt || isGeneratingImages}");
+    expect(appSource).toContain("isBusy={isSessionMutationBusy}");
     expect(promptEditors).toContain("isBusy: boolean;");
     expect(promptEditors).toContain("disabled={isBusy || document.historyIndex === 0}");
     expect(promptEditors).toContain("disabled={isBusy || document.historyIndex === document.history.length - 1}");
     expect(promptEditors).toContain("disabled={isBusy}");
   });
 
-  it("serializes imports, local uploads, and generation session mutations", () => {
+  it("serializes every persistent session mutation, including resets and manual prompt saves", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const controlsStart = appSource.indexOf('<section className="top-bar">');
     const controls = appSource.slice(controlsStart, appSource.indexOf('<section className="workspace">', controlsStart));
@@ -196,7 +196,16 @@ describe("studio preview layout", () => {
     const generationWorkspaceStart = appSource.indexOf("function GenerationWorkspace({");
     const generationWorkspace = appSource.slice(generationWorkspaceStart, appSource.indexOf("function MediaSelector", generationWorkspaceStart));
 
-    expect(appSource).toContain("const isSessionMutationBusy = isImporting || isGeneratingPrompt || isGeneratingImages;");
+    const resetStart = appSource.indexOf("async function handleResetMediaSession()");
+    const reset = appSource.slice(resetStart, appSource.indexOf("async function handleGenerateImagePrompts", resetStart));
+    const savePromptStart = appSource.indexOf("async function handleSavePrompt(mediaId: string)");
+    const savePrompt = appSource.slice(savePromptStart, appSource.indexOf("async function handleSaveGenerationPrefixes", savePromptStart));
+
+    expect(appSource).toContain("const [isResetting, setIsResetting] = useState(false);");
+    expect(appSource).toContain("const [isSavingPrompt, setIsSavingPrompt] = useState(false);");
+    expect(appSource).toContain("const isSessionMutationBusy = isImporting || isResetting || isSavingPrompt || isGeneratingPrompt || isGeneratingImages;");
+    expect(appSource).toContain("const isSessionMutationBusyRef = useRef(false);");
+    expect(appSource).toContain("function tryBeginSessionMutation()");
     expect(controls).toContain("disabled={isSessionMutationBusy}");
     expect(controls).toContain("disabled={isSessionMutationBusy || !isBackendCurrent}");
     expect(controls).toContain('event.key === "Enter" && !isSessionMutationBusy');
@@ -204,5 +213,12 @@ describe("studio preview layout", () => {
     expect(generationWorkspace).toContain("isSessionMutationBusy: boolean;");
     expect(generationWorkspace).toContain("disabled={isSessionMutationBusy || selectedForGenerationCount === 0}");
     expect(generationWorkspace).toContain("disabled={isSessionMutationBusy}");
+    expect(preview).toContain("isBusy={isSessionMutationBusy}");
+    expect(reset).toContain("if (!tryBeginSessionMutation())");
+    expect(reset).toContain("setIsResetting(true);");
+    expect(reset).toContain("setIsResetting(false);");
+    expect(savePrompt).toContain("if (!tryBeginSessionMutation())");
+    expect(savePrompt).toContain("setIsSavingPrompt(true);");
+    expect(savePrompt).toContain("setIsSavingPrompt(false);");
   });
 });
