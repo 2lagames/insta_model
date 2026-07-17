@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { defaultPromptInstruction } from "./ideogramPrompt";
 
 export type PrivateConnections = {
-  scrapeCreatorsApiKey?: string;
+  apifyApiToken?: string;
   ollamaCloudApiKey?: string;
   ollamaProvider?: "cloud" | "local";
   ollamaCloudModel?: string;
@@ -19,11 +19,11 @@ export type PrivateConnections = {
   runningHubImageFieldName?: string;
 };
 
-export type ConnectionKeyName = "scrapeCreatorsApiKey" | "ollamaCloudApiKey" | "runningHubApiKey";
+export type ConnectionKeyName = "apifyApiToken" | "ollamaCloudApiKey" | "runningHubApiKey";
 
 export type PublicConnections = {
-  hasScrapeCreatorsApiKey: boolean;
-  scrapeCreatorsApiKeyPreview?: string;
+  hasApifyApiToken: boolean;
+  apifyApiTokenPreview?: string;
   hasOllamaCloudApiKey: boolean;
   ollamaCloudApiKeyPreview?: string;
   ollamaProvider?: "cloud" | "local";
@@ -63,13 +63,13 @@ export class ConnectionsStore {
 
   async readPublic(): Promise<PublicConnections> {
     const connections = await this.readPrivate();
-    const apiKey = connections.scrapeCreatorsApiKey?.trim();
+    const apifyApiToken = connections.apifyApiToken?.trim();
     const ollamaCloudApiKey = connections.ollamaCloudApiKey?.trim();
     const runningHubApiKey = connections.runningHubApiKey?.trim();
 
     return {
-      hasScrapeCreatorsApiKey: Boolean(apiKey),
-      ...(apiKey ? { scrapeCreatorsApiKeyPreview: maskSecret(apiKey) } : {}),
+      hasApifyApiToken: Boolean(apifyApiToken),
+      ...(apifyApiToken ? { apifyApiTokenPreview: maskSecret(apifyApiToken) } : {}),
       hasOllamaCloudApiKey: Boolean(ollamaCloudApiKey),
       ...(ollamaCloudApiKey ? { ollamaCloudApiKeyPreview: maskSecret(ollamaCloudApiKey) } : {}),
       ...(connections.ollamaProvider ? { ollamaProvider: connections.ollamaProvider } : {}),
@@ -106,7 +106,7 @@ export class ConnectionsStore {
 
   async save(next: PrivateConnections): Promise<void> {
     const current = await this.readPrivate();
-    const scrapeCreatorsApiKey = normalizeSecret(next.scrapeCreatorsApiKey, current.scrapeCreatorsApiKey);
+    const apifyApiToken = normalizeSecret(next.apifyApiToken, current.apifyApiToken);
     const ollamaCloudApiKey = normalizeSecret(next.ollamaCloudApiKey, current.ollamaCloudApiKey);
     const runningHubApiKey = normalizeSecret(next.runningHubApiKey, current.runningHubApiKey);
     const runningHubWorkflowId = normalizeSetting(next.runningHubWorkflowId, current.runningHubWorkflowId);
@@ -124,7 +124,7 @@ export class ConnectionsStore {
     const runningHubImageFieldName = normalizeSetting(next.runningHubImageFieldName, current.runningHubImageFieldName);
 
     const data: PrivateConnections = {
-      ...(scrapeCreatorsApiKey ? { scrapeCreatorsApiKey } : {}),
+      ...(apifyApiToken ? { apifyApiToken } : {}),
       ...(ollamaCloudApiKey ? { ollamaCloudApiKey } : {}),
       ...(ollamaProvider ? { ollamaProvider } : {}),
       ...(ollamaCloudModel ? { ollamaCloudModel } : {}),

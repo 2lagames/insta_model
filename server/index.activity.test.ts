@@ -95,7 +95,7 @@ describe("image prompt activity", () => {
     const settingsEnd = source.indexOf('app.put("/api/connections/keys/:keyName"', settingsStart);
     const settingsRoute = source.slice(settingsStart, settingsEnd);
 
-    expect(settingsRoute).not.toContain("scrapeCreatorsApiKey");
+    expect(settingsRoute).not.toContain("apifyApiToken");
     expect(settingsRoute).not.toContain("ollamaCloudApiKey");
     expect(settingsRoute).not.toContain("runningHubApiKey");
   });
@@ -104,8 +104,26 @@ describe("image prompt activity", () => {
     const source = readFileSync("server/index.ts", "utf8");
 
     expect(source).not.toContain('app.use("/media", express.static(dataDir))');
-    expect(source).toContain('app.get("/media/imports/:importId/scrapecreators-response.json"');
+    expect(source).toContain('app.get("/media/imports/:importId/apify-photos.json"');
     expect(source).toContain("resolveImportMetadataPath");
+  });
+
+  it("uses the Apify token for Instagram imports", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+    const importRouteStart = source.indexOf('app.post("/api/imports"');
+    const importRoute = source.slice(importRouteStart, source.indexOf('app.post("/api/imports/cleanup"', importRouteStart));
+
+    expect(importRoute).toContain("apifyApiToken: connections.apifyApiToken ?? \"\"");
+    expect(source).toContain('importProvider: "apify"');
+  });
+
+  it("rejects reels before the local cache can reuse legacy video imports", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+    const importRouteStart = source.indexOf('app.post("/api/imports"');
+    const cacheLookup = source.indexOf("store.findNewestReusableBySourceUrl", importRouteStart);
+    const importRoute = source.slice(importRouteStart, cacheLookup);
+
+    expect(importRoute).toContain('getInstagramSourceKind(validation.url) === "reel"');
   });
 
   it("runs RunningHub only with submitted media and edited prompts", () => {

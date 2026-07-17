@@ -3,162 +3,95 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  buildScrapeCreatorsPostUrl,
-  checkScrapeCreatorsPostAccess,
-  createImportItemFromScrapeCreatorsPost,
-  formatScrapeCreatorsForbiddenError,
+  buildApifyInstagramScraperUrl,
+  createImportItemFromApifyPosts,
   importInstagramUrl,
   materializeImportAssets
 } from "./instagramImporter";
 
 const postUrl = "https://www.instagram.com/p/DZ-boFRkeAm/";
 
-describe("buildScrapeCreatorsPostUrl", () => {
-  it("builds the post lookup URL with media download enabled", () => {
-    const url = buildScrapeCreatorsPostUrl(postUrl);
-
-    expect(url.toString()).toBe(
-      "https://api.scrapecreators.com/v1/instagram/post?url=https%3A%2F%2Fwww.instagram.com%2Fp%2FDZ-boFRkeAm%2F&trim=false&download_media=true"
+describe("buildApifyInstagramScraperUrl", () => {
+  it("builds the official actor synchronous dataset endpoint without a token in the URL", () => {
+    expect(buildApifyInstagramScraperUrl().toString()).toBe(
+      "https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items"
     );
   });
-
-  it("sends a canonical Instagram URL without share query params", () => {
-    const url = buildScrapeCreatorsPostUrl(`${postUrl}?igsh=MWRjNWg1MGkxMGppMA==`);
-
-    expect(url.searchParams.get("url")).toBe(postUrl);
-  });
-
-  it("can build a non-download access check URL", () => {
-    const url = buildScrapeCreatorsPostUrl(postUrl, { downloadMedia: false });
-
-    expect(url.searchParams.get("download_media")).toBe("false");
-  });
 });
 
-describe("checkScrapeCreatorsPostAccess", () => {
-  it("checks access without requesting media download", async () => {
-    let requestedUrl: URL | undefined;
-    const fetchImpl = (async (url: URL) => {
-      requestedUrl = url;
-      return new Response(JSON.stringify({ data: {} }), { status: 200 });
-    }) as typeof fetch;
+describe("createImportItemFromApifyPosts", () => {
+  it("extracts only all carousel image URLs and drops the caption and video fields", () => {
+    const item = createImportItemFromApifyPosts(postUrl, [{
+      type: "Sidecar",
+      shortCode: "DZ-boFRkeAm",
+      ownerUsername: "example_creator",
+      caption: "This must never be persisted",
+      displayUrl: "https://cdn.example.com/cover.jpg",
+      carouselImages: [
+        "https://cdn.example.com/1.jpg",
+        "https://cdn.example.com/2.jpg",
+        "https://cdn.example.com/3.jpg"
+      ],
+      videoUrl: "https://cdn.example.com/should-not-download.mp4"
+    }], "2026-07-18T10:00:00.000Z", "import-123");
 
-    await expect(checkScrapeCreatorsPostAccess(postUrl, "api-key", fetchImpl)).resolves.toEqual({
-      ok: true,
-      sourceUrl: postUrl
-    });
-    expect(requestedUrl?.searchParams.get("download_media")).toBe("false");
-  });
-});
-
-describe("formatScrapeCreatorsForbiddenError", () => {
-  it("explains age-restricted media as a provider limitation", () => {
-    const message = formatScrapeCreatorsForbiddenError(
-      "https://www.instagram.com/reel/example/",
-      {
-        error: "forbidden",
-        errorStatus: 403,
-        credits_remaining: 999,
-        message: "Shoot it looks like the post is age restricted :("
-      },
-      "{\"error\":\"forbidden\"}"
-    );
-
-    expect(message).toContain("age-restricted");
-    expect(message).toContain("only scrapes public data");
-    expect(message).toContain("authenticated browser/cookies fallback");
-  });
-});
-
-describe("createImportItemFromScrapeCreatorsPost", () => {
-  it("extracts carousel photos and caption text", () => {
-    const item = createImportItemFromScrapeCreatorsPost(postUrl, {
-      data: {
-        xdt_shortcode_media: {
-          shortcode: "DZ-boFRkeAm",
-          display_url: "https://cdn.example.com/cover.jpg",
-          edge_media_to_caption: {
-            edges: [{ node: { text: "Long post caption\nwith multiple lines" } }]
-          },
-          edge_sidecar_to_children: {
-            edges: [
-              { node: { id: "photo-one", is_video: false, display_url: "https://cdn.example.com/1.jpg" } },
-              { node: { id: "photo-two", is_video: false, display_url: "https://cdn.example.com/2.jpg" } },
-              { node: { id: "photo-three", is_video: false, display_url: "https://cdn.example.com/3.jpg" } },
-              { node: { id: "photo-four", is_video: false, display_url: "https://cdn.example.com/4.jpg" } }
-            ]
-          }
-        }
-      }
-    }, "2026-06-25T10:00:00.000Z");
-
+    expect(item.provider).toBe("apify");
     expect(item.mediaType).toBe("carousel");
-    expect(item.caption).toBe("Long post caption\nwith multiple lines");
-    expect(item.assets).toHaveLength(4);
-    expect(item.assets.map((asset) => asset.files.image)).toEqual([
-      "https://cdn.example.com/1.jpg",
-      "https://cdn.example.com/2.jpg",
-      "https://cdn.example.com/3.jpg",
-      "https://cdn.example.com/4.jpg"
+    expect(item.title).toBeUndefined();
+    expect(item.caption).toBeUndefined();
+    expect(item.assets).toEqual([
+      { id: "DZ-boFRkeAm-image-001", mediaType: "image", files: { image: "https://cdn.example.com/1.jpg", thumbnail: "https://cdn.example.com/1.jpg" } },
+      { id: "DZ-boFRkeAm-image-002", mediaType: "image", files: { image: "https://cdn.example.com/2.jpg", thumbnail: "https://cdn.example.com/2.jpg" } },
+      { id: "DZ-boFRkeAm-image-003", mediaType: "image", files: { image: "https://cdn.example.com/3.jpg", thumbnail: "https://cdn.example.com/3.jpg" } }
     ]);
   });
 
-  it("extracts video URL and first-frame thumbnail", () => {
-    const item = createImportItemFromScrapeCreatorsPost("https://www.instagram.com/reel/video-post/", {
-      data: {
-        xdt_shortcode_media: {
-          shortcode: "video-post",
-          is_video: true,
-          video_url: "https://cdn.example.com/video.mp4",
-          thumbnail_src: "https://cdn.example.com/frame.jpg",
-          edge_media_to_caption: { edges: [] }
-        }
-      }
-    }, "2026-06-25T10:00:00.000Z");
+  it("uses the image post display URL when the actor returns no image array", () => {
+    const item = createImportItemFromApifyPosts(postUrl, [{
+      type: "Image",
+      shortCode: "DZ-boFRkeAm",
+      displayUrl: "https://cdn.example.com/one.jpg"
+    }], "2026-07-18T10:00:00.000Z", "import-123");
 
-    expect(item.sourceKind).toBe("reel");
-    expect(item.mediaType).toBe("video");
-    expect(item.assets).toHaveLength(1);
-    expect(item.assets[0]?.files.video).toBe("https://cdn.example.com/video.mp4");
-    expect(item.assets[0]?.files.firstFrame).toBe("https://cdn.example.com/frame.jpg");
+    expect(item.mediaType).toBe("image");
+    expect(item.assets).toEqual([
+      { id: "DZ-boFRkeAm-image-001", mediaType: "image", files: { image: "https://cdn.example.com/one.jpg", thumbnail: "https://cdn.example.com/one.jpg" } }
+    ]);
+  });
+
+  it("rejects a reel response rather than downloading its video or cover", () => {
+    expect(() => createImportItemFromApifyPosts("https://www.instagram.com/reel/example/", [{
+      type: "Video",
+      displayUrl: "https://cdn.example.com/reel-cover.jpg",
+      videoUrl: "https://cdn.example.com/reel.mp4"
+    }], "2026-07-18T10:00:00.000Z", "import-123")).toThrow("did not include downloadable photos");
   });
 });
 
 describe("materializeImportAssets", () => {
-  it("downloads video assets into input date folders and creates first-frame thumbnails", async () => {
+  it("downloads photo assets into input date folders", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "input-media-"));
     const inputDir = join(tempDir, "input");
 
     try {
-      const assets = await materializeImportAssets([
-        {
-          id: "video-post",
-          mediaType: "video",
-          files: {
-            video: "https://cdn.example.com/video.mp4"
-          }
-        }
-      ], {
+      const assets = await materializeImportAssets([{
+        id: "photo-post",
+        mediaType: "image",
+        files: { image: "https://cdn.example.com/photo.jpg" }
+      }], {
         inputDir,
         importId: "import-123",
-        createdAt: "2026-06-25T10:00:00.000Z",
-        fetchImpl: (async () => new Response(Buffer.from("video-bytes"), {
+        createdAt: "2026-07-18T10:00:00.000Z",
+        fetchImpl: (async () => new Response(Buffer.from("photo-bytes"), {
           status: 200,
-          headers: { "content-type": "video/mp4" }
-        })) as typeof fetch,
-        generateFirstFrame: async (_videoPath, framePath) => {
-          await mkdir(join(inputDir, "20260625", "import-123"), { recursive: true });
-          await writeFile(framePath, "frame-bytes");
-        }
+          headers: { "content-type": "image/jpeg" }
+        })) as typeof fetch
       });
 
-      expect(assets[0]?.files.video).toBe("/input/20260625/import-123/video-001.mp4");
-      expect(assets[0]?.files.firstFrame).toBe("/input/20260625/import-123/first-frame-001.jpg");
-      expect(assets[0]?.files.thumbnail).toBe("/input/20260625/import-123/first-frame-001.jpg");
-      await expect(readFile(join(inputDir, "20260625", "import-123", "video-001.mp4"), "utf8"))
-        .resolves.toBe("video-bytes");
-      await expect(readFile(join(inputDir, "20260625", "import-123", "first-frame-001.jpg"), "utf8"))
-        .resolves.toBe("frame-bytes");
+      expect(assets[0]?.files.image).toBe("/input/20260718/import-123/image-001.jpg");
+      expect(assets[0]?.files.thumbnail).toBe("/input/20260718/import-123/image-001.jpg");
+      await expect(readFile(join(inputDir, "20260718", "import-123", "image-001.jpg"), "utf8"))
+        .resolves.toBe("photo-bytes");
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
@@ -166,20 +99,80 @@ describe("materializeImportAssets", () => {
 });
 
 describe("importInstagramUrl", () => {
-  it("does not create final folders when media download fails", async () => {
+  it("rejects a reel before starting a billable Apify run", async () => {
+    let requestCount = 0;
+    const fetchImpl = (async () => {
+      requestCount += 1;
+      return new Response("[]", { status: 200 });
+    }) as typeof fetch;
+
+    await expect(importInstagramUrl("https://www.instagram.com/reel/example/", {
+      dataDir: "/tmp/data",
+      inputDir: "/tmp/input",
+      apifyApiToken: "apify_token_123",
+      fetchImpl
+    })).rejects.toThrow("Only photo posts and photo carousels are supported");
+
+    expect(requestCount).toBe(0);
+  });
+
+  it("calls the official actor for one post and materializes only its photos", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "apify-import-"));
+    const dataDir = join(tempDir, "data");
+    const inputDir = join(tempDir, "input");
+    const requested: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl = (async (url: URL | string, init?: RequestInit) => {
+      requested.push({ url: String(url), init });
+      if (String(url).startsWith("https://api.apify.com/")) {
+        return new Response(JSON.stringify([{
+          type: "Sidecar",
+          shortCode: "DZ-boFRkeAm",
+          images: ["https://cdn.example.com/1.jpg", "https://cdn.example.com/2.jpg"],
+          caption: "discarded"
+        }]), { status: 200 });
+      }
+      return new Response(Buffer.from("photo-bytes"), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      const item = await importInstagramUrl(postUrl, {
+        dataDir,
+        inputDir,
+        apifyApiToken: "apify_token_123",
+        fetchImpl
+      });
+
+      expect(JSON.parse(String(requested[0]?.init?.body))).toEqual({
+        directUrls: [postUrl],
+        resultsType: "posts",
+        resultsLimit: 1
+      });
+      expect(requested[0]?.init?.headers).toEqual({
+        authorization: "Bearer apify_token_123",
+        "content-type": "application/json"
+      });
+      expect(item.assets).toHaveLength(2);
+      expect(item.caption).toBeUndefined();
+      await expect(readFile(join(dataDir, "imports", item.id, "apify-photos.json"), "utf8"))
+        .resolves.toBe(JSON.stringify({ sourceUrl: postUrl, photoUrls: item.assets.map((asset) => asset.files.image) }, null, 2));
+      await expect(readdir(join(dataDir, "imports", item.id))).resolves.not.toContain("apify-response.json");
+      await expect(readFile(join(dataDir, "imports", item.id, "source.json"), "utf8"))
+        .resolves.toContain("\"provider\": \"apify\"");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not create final folders when photo download fails", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "failed-import-"));
     const dataDir = join(tempDir, "data");
     const inputDir = join(tempDir, "input");
     const fetchImpl = (async (url: URL | string) => {
-      if (String(url).startsWith("https://api.scrapecreators.com/")) {
-        return new Response(JSON.stringify({
-          data: {
-            xdt_shortcode_media: {
-              shortcode: "failed-post",
-              display_url: "https://cdn.example.com/image.jpg"
-            }
-          }
-        }), { status: 200 });
+      if (String(url).startsWith("https://api.apify.com/")) {
+        return new Response(JSON.stringify([{
+          type: "Image",
+          displayUrl: "https://cdn.example.com/image.jpg"
+        }]), { status: 200 });
       }
       throw new TypeError("network reset");
     }) as typeof fetch;
@@ -188,7 +181,7 @@ describe("importInstagramUrl", () => {
       await expect(importInstagramUrl(postUrl, {
         dataDir,
         inputDir,
-        scrapeCreatorsApiKey: "api-key",
+        apifyApiToken: "apify_token_123",
         fetchImpl
       })).rejects.toThrow("network reset");
 

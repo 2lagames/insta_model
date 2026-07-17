@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  checkInstagramUrl,
   cancelGeneration,
   clearConnectionKey,
   generateImagePromptsWithOptions,
@@ -75,7 +74,6 @@ export default function App() {
     source: "ui"
   }]);
   const [isImporting, setIsImporting] = useState(false);
-  const [isChecking, setIsChecking] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isSavingPrompt, setIsSavingPrompt] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
@@ -85,7 +83,7 @@ export default function App() {
   const [imageGenerationsPerMedia, setImageGenerationsPerMedia] = useState(1);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [connections, setConnections] = useState<PublicConnections>({
-    hasScrapeCreatorsApiKey: false,
+    hasApifyApiToken: false,
     hasRunningHubApiKey: false
   });
   const [editingKey, setEditingKey] = useState<ConnectionKeyName | null>(null);
@@ -182,7 +180,7 @@ export default function App() {
   useEffect(() => {
     getHealth()
       .then((health) => {
-        if (health.importProvider !== "scrapecreators") {
+        if (health.importProvider !== "apify") {
           setIsBackendCurrent(false);
           recordStatus({
             tone: "error",
@@ -313,7 +311,7 @@ export default function App() {
     recordStatus({
       tone: "running",
       message: forceRefresh
-        ? "Downloading a fresh copy with ScrapeCreators API. This can take a minute."
+        ? "Downloading a fresh copy with Apify. This can take a minute."
         : "Looking for previously downloaded media."
     });
 
@@ -345,30 +343,6 @@ export default function App() {
     } finally {
       setIsImporting(false);
       endSessionMutation();
-    }
-  }
-
-  async function handleCheckImport() {
-    const validation = validateInstagramUrl(url);
-    if (!validation.ok) {
-      recordStatus({ tone: "error", message: validation.message });
-      return;
-    }
-
-    setIsChecking(true);
-    recordStatus({ tone: "running", message: "Checking ScrapeCreators access for this link." });
-    try {
-      const result = await checkInstagramUrl(validation.url);
-      recordStatus({
-        tone: result.ok ? "ready" : "error",
-        message: result.ok
-          ? `ScrapeCreators can access this link: ${result.sourceUrl}`
-          : result.error ?? "ScrapeCreators cannot access this link."
-      });
-    } catch (error) {
-      recordStatus({ tone: "error", message: toErrorMessage(error) });
-    } finally {
-      setIsChecking(false);
     }
   }
 
@@ -853,12 +827,12 @@ export default function App() {
       ) : (
         <section className="connections-page">
           <div className="panel-label">Настройки</div>
-          <div className="connection-card scrapecreators-card">
+          <div className="connection-card apify-card">
             <div>
-              <h2>ScrapeCreators</h2>
-              <KeyStatus hasKey={connections.hasScrapeCreatorsApiKey} preview={connections.scrapeCreatorsApiKeyPreview} />
+              <h2>Apify</h2>
+              <KeyStatus hasKey={connections.hasApifyApiToken} preview={connections.apifyApiTokenPreview} />
             </div>
-            <KeyActions disabled={isSavingKey} onClear={() => void handleClearKey("scrapeCreatorsApiKey")} onEdit={() => handleEditKey("scrapeCreatorsApiKey")} />
+            <KeyActions disabled={isSavingKey} onClear={() => void handleClearKey("apifyApiToken")} onEdit={() => handleEditKey("apifyApiToken")} />
           </div>
           <div className="connection-card ollama-card">
             <div className="ollama-settings">
@@ -1303,8 +1277,8 @@ function GenerationPrefixDialog({
 }
 
 function getIntegrationName(keyName: ConnectionKeyName): string {
-  if (keyName === "scrapeCreatorsApiKey") {
-    return "ScrapeCreators";
+  if (keyName === "apifyApiToken") {
+    return "Apify";
   }
   if (keyName === "ollamaCloudApiKey") {
     return "Ollama Cloud";

@@ -606,12 +606,12 @@ input {
   align-items: start;
 }
 
-.scrapecreators-card {
+.apify-card {
   grid-template-columns: 1fr;
   align-items: start;
 }
 
-.scrapecreators-card .key-actions {
+.apify-card .key-actions {
   justify-self: start;
 }
 

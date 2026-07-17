@@ -20,36 +20,36 @@ describe("ConnectionsStore", () => {
     const store = new ConnectionsStore(tempDir);
 
     await expect(store.readPublic()).resolves.toEqual({
-      hasScrapeCreatorsApiKey: false,
+      hasApifyApiToken: false,
       hasOllamaCloudApiKey: false,
       ollamaPromptInstruction: defaultPromptInstruction,
       hasRunningHubApiKey: false
     });
   });
 
-  it("stores the ScrapeCreators API key locally and exposes only a preview", async () => {
+  it("stores the Apify API token locally and exposes only a preview", async () => {
     const store = new ConnectionsStore(tempDir);
 
-    await store.save({ scrapeCreatorsApiKey: "fake_scrapecreators_key_1234567890" });
+    await store.save({ apifyApiToken: "apify_token_1234567890" });
 
     await expect(store.readPrivate()).resolves.toEqual({
-      scrapeCreatorsApiKey: "fake_scrapecreators_key_1234567890"
+      apifyApiToken: "apify_token_1234567890"
     });
     await expect(store.readPublic()).resolves.toEqual({
-      hasScrapeCreatorsApiKey: true,
-      scrapeCreatorsApiKeyPreview: "******************************7890",
+      hasApifyApiToken: true,
+      apifyApiTokenPreview: "******************7890",
       hasOllamaCloudApiKey: false,
       ollamaPromptInstruction: defaultPromptInstruction,
       hasRunningHubApiKey: false
     });
 
     const raw = await readFile(join(tempDir, "connections.local.json"), "utf8");
-    expect(JSON.parse(raw)).toEqual({ scrapeCreatorsApiKey: "fake_scrapecreators_key_1234567890" });
+    expect(JSON.parse(raw)).toEqual({ apifyApiToken: "apify_token_1234567890" });
   });
 
   it.runIf(process.platform !== "win32")("creates and repairs the private file with owner-only permissions", async () => {
     const filePath = join(tempDir, "connections.local.json");
-    await writeFile(filePath, JSON.stringify({ scrapeCreatorsApiKey: "private-key" }), { mode: 0o644 });
+    await writeFile(filePath, JSON.stringify({ apifyApiToken: "private-key" }), { mode: 0o644 });
     const store = new ConnectionsStore(tempDir);
 
     await store.readPrivate();
@@ -61,7 +61,7 @@ describe("ConnectionsStore", () => {
     const store = new ConnectionsStore(tempDir);
 
     await store.save({
-      scrapeCreatorsApiKey: "fake_scrapecreators_key_1234567890",
+      apifyApiToken: "apify_token_1234567890",
       runningHubApiKey: "rh_secret_abcdef1234567890",
       runningHubWorkflowId: "1904136902449209346",
       runningHubPromptNodeId: "6",
@@ -69,15 +69,15 @@ describe("ConnectionsStore", () => {
     });
 
     await expect(store.readPrivate()).resolves.toEqual({
-      scrapeCreatorsApiKey: "fake_scrapecreators_key_1234567890",
+      apifyApiToken: "apify_token_1234567890",
       runningHubApiKey: "rh_secret_abcdef1234567890",
       runningHubWorkflowId: "1904136902449209346",
       runningHubPromptNodeId: "6",
       runningHubPromptFieldName: "text"
     });
     await expect(store.readPublic()).resolves.toEqual({
-      hasScrapeCreatorsApiKey: true,
-      scrapeCreatorsApiKeyPreview: "******************************7890",
+      hasApifyApiToken: true,
+      apifyApiTokenPreview: "******************7890",
       hasOllamaCloudApiKey: false,
       ollamaPromptInstruction: defaultPromptInstruction,
       hasRunningHubApiKey: true,
@@ -92,7 +92,7 @@ describe("ConnectionsStore", () => {
     const store = new ConnectionsStore(tempDir);
 
     await store.save({
-      scrapeCreatorsApiKey: "scrape-key",
+      apifyApiToken: "apify-token",
       ollamaCloudApiKey: "cloud-key",
       ollamaProvider: "cloud",
       ollamaCloudModel: "gemma3",
@@ -104,7 +104,7 @@ describe("ConnectionsStore", () => {
     await store.clearKey("ollamaCloudApiKey");
 
     await expect(store.readPrivate()).resolves.toEqual({
-      scrapeCreatorsApiKey: "scrape-key",
+      apifyApiToken: "apify-token",
       ollamaProvider: "cloud",
       ollamaCloudModel: "gemma3",
       ollamaLocalModel: "qwen2.5vl:7b",
@@ -113,7 +113,7 @@ describe("ConnectionsStore", () => {
       runningHubImageFieldName: "image"
     });
     await expect(store.readPublic()).resolves.toMatchObject({
-      hasScrapeCreatorsApiKey: true,
+      hasApifyApiToken: true,
       hasOllamaCloudApiKey: false,
       ollamaProvider: "cloud",
       ollamaCloudModel: "gemma3",

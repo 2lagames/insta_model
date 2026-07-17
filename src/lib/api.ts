@@ -27,13 +27,6 @@ export type ImportsSessionResponse = {
   sessionItemIds: string[];
 };
 
-type ImportCheckResponse = {
-  ok: boolean;
-  sourceUrl: string;
-  provider: "scrapecreators";
-  error?: string;
-};
-
 type ErrorResponse = {
   error?: string;
 };
@@ -82,7 +75,7 @@ export type ImageGenerationJobInput = {
   prompt: string;
 };
 
-export type ConnectionKeyName = "scrapeCreatorsApiKey" | "ollamaCloudApiKey" | "runningHubApiKey";
+export type ConnectionKeyName = "apifyApiToken" | "ollamaCloudApiKey" | "runningHubApiKey";
 
 export type OllamaModel = {
   name: string;
@@ -109,8 +102,8 @@ export type HealthResponse = {
 };
 
 export type PublicConnections = {
-  hasScrapeCreatorsApiKey: boolean;
-  scrapeCreatorsApiKeyPreview?: string;
+  hasApifyApiToken: boolean;
+  apifyApiTokenPreview?: string;
   hasOllamaCloudApiKey?: boolean;
   ollamaCloudApiKeyPreview?: string;
   ollamaProvider?: "cloud" | "local";
@@ -239,26 +232,6 @@ export async function cleanupDuplicateImports(): Promise<CleanupImportsResult> {
     retainedItemIds: data.retainedItemIds,
     deletedItemIds: data.deletedItemIds
   };
-}
-
-export async function checkInstagramUrl(url: string): Promise<ImportCheckResponse> {
-  const response = await apiFetch("/api/imports/check", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ url })
-  });
-  const data = (await response.json()) as ImportCheckResponse | ErrorResponse;
-  if (!response.ok && "error" in data) {
-    return {
-      ok: false,
-      sourceUrl: url,
-      provider: "scrapecreators",
-      error: data.error
-    };
-  }
-  return data as ImportCheckResponse;
 }
 
 export async function openImportsFolder(): Promise<void> {

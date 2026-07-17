@@ -238,7 +238,7 @@ function createLocalImageItem(id: string, createdAt: string): ImportItem {
     files: {
       image: imagePath,
       thumbnail: imagePath,
-      metadata: `/media/imports/${id}/scrapecreators-response.json`
+      metadata: `/media/imports/${id}/apify-photos.json`
     },
     assets: [{
       id: "photo",
@@ -246,7 +246,7 @@ function createLocalImageItem(id: string, createdAt: string): ImportItem {
       files: {
         image: imagePath,
         thumbnail: imagePath,
-        metadata: `/media/imports/${id}/scrapecreators-response.json`
+        metadata: `/media/imports/${id}/apify-photos.json`
       }
     }]
   };
@@ -254,7 +254,7 @@ function createLocalImageItem(id: string, createdAt: string): ImportItem {
 
 async function writeImportFiles(dataDir: string, inputDir: string, item: ImportItem): Promise<void> {
   const imagePath = join(inputDir, "20260710", item.id, "image.jpg");
-  const metadataPath = join(dataDir, "imports", item.id, "scrapecreators-response.json");
+  const metadataPath = join(dataDir, "imports", item.id, "apify-photos.json");
   await mkdir(join(inputDir, "20260710", item.id), { recursive: true });
   await mkdir(join(dataDir, "imports", item.id), { recursive: true });
   await Promise.all([

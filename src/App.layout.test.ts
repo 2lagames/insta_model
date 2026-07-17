@@ -37,6 +37,8 @@ describe("studio preview layout", () => {
     expect(appSource).not.toContain('recordStatus({ tone: "ready", message: prompt })');
     expect(appSource).toContain("Image generation");
     expect(appSource).toContain("Вставить ключ");
+    expect(appSource).toContain("Apify");
+    expect(appSource).not.toContain("ScrapeCreators");
     expect(appSource).toContain("Ollama Cloud");
     expect(appSource).toContain("Локальная Ollama");
     expect(appSource).toContain("Image node ID");

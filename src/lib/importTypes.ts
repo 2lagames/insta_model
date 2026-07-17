@@ -26,7 +26,7 @@ export type ImportItem = {
   createdAt: string;
   title?: string;
   caption?: string;
-  provider?: "scrapecreators" | "runninghub";
+  provider?: "apify" | "local" | "runninghub";
   error?: string;
   files: ImportFiles;
   assets: ImportAsset[];
