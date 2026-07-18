@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ConnectionsStore } from "./connectionsStore";
-import { defaultPromptInstruction } from "./ideogramPrompt";
 
 let tempDir: string;
 
@@ -22,7 +21,7 @@ describe("ConnectionsStore", () => {
     await expect(store.readPublic()).resolves.toEqual({
       hasApifyApiToken: false,
       hasOllamaCloudApiKey: false,
-      ollamaPromptInstruction: defaultPromptInstruction,
+      ollamaPromptInstruction: "",
       hasRunningHubApiKey: false
     });
   });
@@ -39,7 +38,7 @@ describe("ConnectionsStore", () => {
       hasApifyApiToken: true,
       apifyApiTokenPreview: "******************7890",
       hasOllamaCloudApiKey: false,
-      ollamaPromptInstruction: defaultPromptInstruction,
+      ollamaPromptInstruction: "",
       hasRunningHubApiKey: false
     });
 
@@ -79,7 +78,7 @@ describe("ConnectionsStore", () => {
       hasApifyApiToken: true,
       apifyApiTokenPreview: "******************7890",
       hasOllamaCloudApiKey: false,
-      ollamaPromptInstruction: defaultPromptInstruction,
+      ollamaPromptInstruction: "",
       hasRunningHubApiKey: true,
       runningHubApiKeyPreview: "**********************7890",
       runningHubWorkflowId: "1904136902449209346",

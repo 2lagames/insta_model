@@ -1,6 +1,5 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { defaultPromptInstruction } from "./ideogramPrompt";
 import { legacyRunningHubBindings, normalizeRunningHubBindings, type RunningHubBinding } from "../src/lib/studioBindings";
 
 export type PrivateConnections = {
@@ -83,7 +82,7 @@ export class ConnectionsStore {
       ...(connections.ollamaProvider ? { ollamaProvider: connections.ollamaProvider } : {}),
       ...(connections.ollamaCloudModel ? { ollamaCloudModel: connections.ollamaCloudModel } : {}),
       ...(connections.ollamaLocalModel ? { ollamaLocalModel: connections.ollamaLocalModel } : {}),
-      ollamaPromptInstruction: connections.ollamaPromptInstruction ?? defaultPromptInstruction,
+      ollamaPromptInstruction: connections.ollamaPromptInstruction ?? "",
       ...(connections.generationPrefixOptions !== undefined ? { generationPrefixOptions: connections.generationPrefixOptions } : {}),
       ...(connections.generationPrefixSelection ? { generationPrefixSelection: connections.generationPrefixSelection } : {}),
       hasRunningHubApiKey: Boolean(runningHubApiKey),
