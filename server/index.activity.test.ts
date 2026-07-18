@@ -95,7 +95,7 @@ describe("image prompt activity", () => {
     const settingsEnd = source.indexOf('app.put("/api/connections/keys/:keyName"', settingsStart);
     const settingsRoute = source.slice(settingsStart, settingsEnd);
 
-    expect(settingsRoute).not.toContain("scrapeCreatorsApiKey");
+    expect(settingsRoute).not.toContain("apifyApiToken");
     expect(settingsRoute).not.toContain("ollamaCloudApiKey");
     expect(settingsRoute).not.toContain("runningHubApiKey");
   });
@@ -104,8 +104,33 @@ describe("image prompt activity", () => {
     const source = readFileSync("server/index.ts", "utf8");
 
     expect(source).not.toContain('app.use("/media", express.static(dataDir))');
-    expect(source).toContain('app.get("/media/imports/:importId/scrapecreators-response.json"');
+    expect(source).toContain('app.get("/media/imports/:importId/apify-media.json"');
     expect(source).toContain("resolveImportMetadataPath");
+  });
+
+  it("uses the Apify token for Instagram imports", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+    const importRouteStart = source.indexOf('app.post("/api/imports"');
+    const importRoute = source.slice(importRouteStart, source.indexOf('app.post("/api/imports/cleanup"', importRouteStart));
+
+    expect(importRoute).toContain("apifyApiToken: connections.apifyApiToken ?? \"\"");
+    expect(source).toContain('importProvider: "apify"');
+  });
+
+  it("allows reels through the import route for the Apify reel importer", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+    const importRouteStart = source.indexOf('app.post("/api/imports"');
+    const cacheLookup = source.indexOf("store.findNewestReusableBySourceUrl", importRouteStart);
+    const importRoute = source.slice(importRouteStart, cacheLookup);
+
+    expect(importRoute).not.toContain('getInstagramSourceKind(validation.url) === "reel"');
+  });
+
+  it("preserves saved RunningHub bindings when unrelated connection fields are updated", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+
+    expect(source).toContain("runningHubBindings: parseRunningHubBindings(request.body?.runningHubBindings)");
+    expect(source).toContain("if (!Array.isArray(value))");
   });
 
   it("runs RunningHub only with submitted media and edited prompts", () => {
@@ -116,7 +141,8 @@ describe("image prompt activity", () => {
     expect(imageRoute).toContain("parseRunningHubPromptJobs(request.body?.jobs)");
     expect(imageRoute).not.toContain("generateIdeogramPromptForMedia");
     expect(imageRoute).not.toContain("workflowJson");
-    expect(imageRoute).toContain("imagePath: resolvePromptMediaImagePath(job.media.imagePath)");
+    expect(imageRoute).toContain("imagePath: job.media.generatedImagePath ? undefined : resolveStudioMediaPath(job.media.imagePath)");
+    expect(imageRoute).toContain("videoPath: job.media.videoPath ? resolveStudioMediaPath(job.media.videoPath) : undefined");
     expect(imageRoute).toContain("onTaskCreated");
     expect(imageRoute).toContain("activeGeneration.registerRunningHubTask");
   });

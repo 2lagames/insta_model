@@ -1,5 +1,6 @@
 import type { CurrentMediaSession, ImportItem } from "./importTypes";
 import type { PromptMediaInput } from "./promptTypes";
+import type { RunningHubBinding } from "./studioBindings";
 
 type ImportsResponse = {
   items: ImportItem[];
@@ -25,13 +26,6 @@ export type ImportsSessionResponse = {
   items: ImportItem[];
   session: CurrentMediaSession;
   sessionItemIds: string[];
-};
-
-type ImportCheckResponse = {
-  ok: boolean;
-  sourceUrl: string;
-  provider: "scrapecreators";
-  error?: string;
 };
 
 type ErrorResponse = {
@@ -82,7 +76,7 @@ export type ImageGenerationJobInput = {
   prompt: string;
 };
 
-export type ConnectionKeyName = "scrapeCreatorsApiKey" | "ollamaCloudApiKey" | "runningHubApiKey";
+export type ConnectionKeyName = "apifyApiToken" | "ollamaCloudApiKey" | "runningHubApiKey";
 
 export type OllamaModel = {
   name: string;
@@ -96,10 +90,7 @@ export type ConnectionSaveInput = {
   generationPrefixOptions?: string;
   generationPrefixSelection?: string;
   runningHubWorkflowId?: string;
-  runningHubPromptNodeId?: string;
-  runningHubPromptFieldName?: string;
-  runningHubImageNodeId?: string;
-  runningHubImageFieldName?: string;
+  runningHubBindings?: RunningHubBinding[];
 };
 
 export type HealthResponse = {
@@ -109,8 +100,8 @@ export type HealthResponse = {
 };
 
 export type PublicConnections = {
-  hasScrapeCreatorsApiKey: boolean;
-  scrapeCreatorsApiKeyPreview?: string;
+  hasApifyApiToken: boolean;
+  apifyApiTokenPreview?: string;
   hasOllamaCloudApiKey?: boolean;
   ollamaCloudApiKeyPreview?: string;
   ollamaProvider?: "cloud" | "local";
@@ -122,10 +113,7 @@ export type PublicConnections = {
   hasRunningHubApiKey: boolean;
   runningHubApiKeyPreview?: string;
   runningHubWorkflowId?: string;
-  runningHubPromptNodeId?: string;
-  runningHubPromptFieldName?: string;
-  runningHubImageNodeId?: string;
-  runningHubImageFieldName?: string;
+  runningHubBindings?: RunningHubBinding[];
 };
 
 export async function listImports(): Promise<ImportsSessionResponse> {
@@ -241,26 +229,6 @@ export async function cleanupDuplicateImports(): Promise<CleanupImportsResult> {
   };
 }
 
-export async function checkInstagramUrl(url: string): Promise<ImportCheckResponse> {
-  const response = await apiFetch("/api/imports/check", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ url })
-  });
-  const data = (await response.json()) as ImportCheckResponse | ErrorResponse;
-  if (!response.ok && "error" in data) {
-    return {
-      ok: false,
-      sourceUrl: url,
-      provider: "scrapecreators",
-      error: data.error
-    };
-  }
-  return data as ImportCheckResponse;
-}
-
 export async function openImportsFolder(): Promise<void> {
   const response = await apiFetch("/api/open-imports-folder", { method: "POST" });
   await assertOk(response);
@@ -311,13 +279,17 @@ export async function generateImages(jobs: ImageGenerationJobInput[]): Promise<I
   return await generateImagesWithOptions(jobs);
 }
 
-export async function generateImagesWithOptions(jobs: ImageGenerationJobInput[], options: { signal?: AbortSignal } = {}): Promise<ImageGenerationResult> {
+export async function generateImagesWithOptions(jobs: ImageGenerationJobInput[], options: { signal?: AbortSignal; batchPosition?: number; batchTotal?: number } = {}): Promise<ImageGenerationResult> {
   const response = await apiFetch("/api/generation/images", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ jobs }),
+    body: JSON.stringify({
+      jobs,
+      ...(options.batchPosition !== undefined ? { batchPosition: options.batchPosition } : {}),
+      ...(options.batchTotal !== undefined ? { batchTotal: options.batchTotal } : {})
+    }),
     ...(options.signal ? { signal: options.signal } : {})
   });
   await assertOk(response);

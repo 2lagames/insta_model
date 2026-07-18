@@ -2,12 +2,12 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("studio preview layout", () => {
-  it("keeps vertical media and details side by side", () => {
+  it("keeps vertical source and generated media panels side by side", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const cssSource = readFileSync("src/App.css", "utf8");
 
     expect(appSource).toContain('className="preview-main"');
-    expect(appSource).toContain('className="preview-details"');
+    expect(appSource).toContain('className="media-column generated-media-column"');
     expect(appSource).toContain('className="log-panel');
     expect(appSource).toContain("Media");
     expect(appSource).toContain('<MediaSelector');
@@ -37,11 +37,14 @@ describe("studio preview layout", () => {
     expect(appSource).not.toContain('recordStatus({ tone: "ready", message: prompt })');
     expect(appSource).toContain("Image generation");
     expect(appSource).toContain("Вставить ключ");
+    expect(appSource).toContain("Apify");
+    expect(appSource).not.toContain("ScrapeCreators");
     expect(appSource).toContain("Ollama Cloud");
     expect(appSource).toContain("Локальная Ollama");
-    expect(appSource).toContain("Image node ID");
+    expect(appSource).toContain("Workflow bindings");
     expect(appSource).toContain('aria-label="Отменить изменение промта"');
-    expect(appSource).toContain("generateImagesWithOptions([imageJob], { signal: abortController.signal })");
+    expect(appSource).toContain("batchPosition: batchIndex + 1");
+    expect(appSource).toContain("batchTotal: imageJobs.length");
     expect(appSource).not.toContain("workflow-file-control");
     expect(cssSource).toContain("aspect-ratio: 9 / 16");
     expect(cssSource).toContain(".gallery-select");
@@ -52,13 +55,12 @@ describe("studio preview layout", () => {
     expect(cssSource).toContain("height: clamp(560px, 68vh, 780px)");
   });
 
-  it("aligns column content at the top without stretching the studio panels", () => {
+  it("aligns source and generated media columns at the top without stretching the studio panels", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const cssSource = readFileSync("src/App.css", "utf8");
 
-    expect(appSource).toContain('className="info-content"');
-    expect(cssSource).toContain(".preview-details {\n  min-width: 0;\n  display: grid;\n  grid-template-rows: auto auto;\n  gap: 0;");
-    expect(cssSource).toContain(".info-content {\n  display: grid;\n  gap: 8px;");
+    expect(appSource).toContain('className="media-column generated-media-column"');
+    expect(cssSource).toContain(".generated-media-column .media-selector {");
     expect(cssSource).toContain("grid-auto-rows: 42px");
     expect(cssSource).not.toContain("--studio-stage-height");
     expect(cssSource).toContain("overflow-y: auto");
@@ -109,6 +111,32 @@ describe("studio preview layout", () => {
     const reset = appSource.slice(resetStart, appSource.indexOf("async function handleGenerateImagePrompts", resetStart));
     expect(reset).not.toContain("setGenerationPrefixOptions");
     expect(reset).not.toContain("setGenerationPrefixSelection");
+  });
+
+  it("separates generated images from source media and removes the unused Info panel", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const previewStart = appSource.indexOf("function Preview({");
+    const preview = appSource.slice(previewStart, appSource.indexOf("function parseGenerationPrefixes", previewStart));
+
+    expect(preview).toContain(">Media</div>");
+    expect(preview).toContain(">Generated Media</div>");
+    expect(preview).not.toContain(">Info</div>");
+    expect(preview).toContain("sourceMaterials");
+    expect(preview).toContain("generatedMaterials");
+    expect(preview).not.toContain("Studio ID");
+    expect(preview).toContain('className="media-column generated-media-column"');
+    expect(readFileSync("src/App.css", "utf8")).toContain(".generated-media-column .gallery-item {");
+    expect(readFileSync("src/App.css", "utf8")).toContain("grid-template-columns: repeat(4, 116px);");
+  });
+
+  it("saves only completed workflow bindings so an empty draft cannot overwrite saved rules", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const saveStart = appSource.indexOf("async function handleSaveConnections()");
+    const saveHandler = appSource.slice(saveStart, appSource.indexOf("function updateRunningHubBinding", saveStart));
+
+    expect(saveHandler).toContain("const populatedRunningHubBindings");
+    expect(saveHandler).toContain("const incompleteRunningHubBinding");
+    expect(saveHandler).toContain("...(populatedRunningHubBindings.length > 0 ? { runningHubBindings: populatedRunningHubBindings } : {})");
   });
 
   it("offers explicit prompt saving and describes a local image source", () => {
@@ -171,7 +199,7 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("multiple");
     expect(appSource).toContain("event.target.files");
     expect(appSource).toContain("appendToSession: index > 0");
-    expect(appSource).toContain("toggleAllMediaSelection(current, materials.map((material) => material.id))");
+    expect(appSource).toContain("toggleAllMediaSelection(current, sourceMaterials.map((material) => material.id))");
     expect(appSource).toContain('hasEveryMaterialSelected ? "Снять выделение" : "Выбрать все"');
     expect(appSource).toContain("setSelectedForGeneration([])");
     expect(appSource).toContain("await createSelectedPrompts(abortController.signal)");
@@ -191,8 +219,10 @@ describe("studio preview layout", () => {
     const generationStart = appSource.indexOf("async function handleGenerateImages()");
     const generationHandler = appSource.slice(generationStart, appSource.indexOf("function handleCancelGeneration", generationStart));
 
-    expect(generationHandler).toContain("for (const imageJob of imageJobs)");
-    expect(generationHandler).toContain("await generateImagesWithOptions([imageJob], { signal: abortController.signal })");
+    expect(generationHandler).toContain("for (const [batchIndex, imageJob] of imageJobs.entries())");
+    expect(generationHandler).toContain("await generateImagesWithOptions([imageJob], {");
+    expect(generationHandler).toContain("batchPosition: batchIndex + 1");
+    expect(generationHandler).toContain("batchTotal: imageJobs.length");
     expect(generationHandler).toContain("setItems((current) => [generated.item");
     expect(generationHandler).toContain("setCurrentSession(generated.session)");
     expect(generationHandler).toContain("setSessionMediaItemIds(generated.session.itemIds)");

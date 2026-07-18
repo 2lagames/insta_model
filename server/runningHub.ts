@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import type { ImportAsset, ImportItem } from "../src/lib/importTypes";
+import { assertUniqueRunningHubBindings, normalizeRunningHubBindings, type RunningHubBinding, type StudioId } from "../src/lib/studioBindings";
 
 type FetchLike = typeof fetch;
 type StatusCallback = (event: { tone: "running" | "ready" | "error"; message: string; source: "runninghub" }) => void;
@@ -13,17 +14,20 @@ const defaultOutputMaxPolls = Number(process.env.RUNNINGHUB_OUTPUT_MAX_POLLS ?? 
 export type RunningHubConfig = {
   apiKey: string;
   workflowId: string;
-  promptNodeId: string;
-  promptFieldName: string;
-  imageNodeId: string;
-  imageFieldName: string;
+  bindings?: RunningHubBinding[];
+  promptNodeId?: string;
+  promptFieldName?: string;
+  imageNodeId?: string;
+  imageFieldName?: string;
 };
 
 export type RunningHubPromptJob = {
   mediaId: string;
   label: string;
-  imagePath: string;
+  imagePath?: string;
   prompt: string;
+  videoPath?: string;
+  generatedImagePath?: string;
 };
 
 export type RunningHubCreatePayload = {
@@ -54,42 +58,50 @@ type RunningHubGenerationOptions = {
   onStatus?: StatusCallback;
   signal?: AbortSignal;
   onTaskCreated?: (taskId: string) => void;
+  batchPosition?: number;
+  batchTotal?: number;
 };
 
 export function buildRunningHubCreatePayload(input: {
   apiKey: string;
   workflowId: string;
-  promptNodeId: string;
-  promptFieldName: string;
-  imageNodeId: string;
-  imageFieldName: string;
-  uploadedImageFileName: string;
-  prompt: string;
+  bindings?: RunningHubBinding[];
+  fieldValues?: Map<string, string>;
+  promptNodeId?: string;
+  promptFieldName?: string;
+  imageNodeId?: string;
+  imageFieldName?: string;
+  uploadedImageFileName?: string;
+  prompt?: string;
 }): RunningHubCreatePayload {
+  const bindings = getRunningHubBindings(input);
+  const fieldValues = input.fieldValues ?? new Map<string, string>([
+    ["1", input.uploadedImageFileName ?? ""],
+    ["2", input.prompt ?? ""]
+  ]);
   return {
     apiKey: input.apiKey,
     workflowId: input.workflowId,
     instanceType: "plus",
-    nodeInfoList: [
-      {
-        nodeId: input.imageNodeId,
-        fieldName: input.imageFieldName,
-        fieldValue: input.uploadedImageFileName
-      },
-      {
-        nodeId: input.promptNodeId,
-        fieldName: input.promptFieldName,
-        fieldValue: input.prompt
-      }
-    ]
+    nodeInfoList: bindings.map((binding) => ({
+      nodeId: binding.nodeId,
+      fieldName: binding.fieldName,
+      fieldValue: fieldValues.get(binding.studioId) ?? ""
+    }))
   };
 }
 
 export async function runRunningHubImageGeneration(options: RunningHubGenerationOptions): Promise<RunningHubGenerationResult> {
-  assertRunningHubConfig(options.config);
+  const bindings = assertRunningHubConfig(options.config);
 
   if (options.jobs.length === 0) {
     throw new Error("RunningHub generation requires at least one prompt job.");
+  }
+
+  const batchPosition = options.batchPosition ?? 1;
+  const batchTotal = options.batchTotal ?? options.jobs.length;
+  if (!Number.isInteger(batchPosition) || !Number.isInteger(batchTotal) || batchPosition < 1 || batchTotal < batchPosition || batchPosition + options.jobs.length - 1 > batchTotal) {
+    throw new Error("RunningHub generation progress is invalid.");
   }
 
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -104,25 +116,26 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
 
   for (const [jobIndex, job] of options.jobs.entries()) {
     throwIfAborted(options.signal);
-    const passLabel = `${job.label} (${jobIndex + 1}/${options.jobs.length})`;
+    const passLabel = `${job.label} (${batchPosition + jobIndex}/${batchTotal})`;
     options.onStatus?.({
       tone: "running",
       source: "runninghub",
       message: `Uploading source image for ${passLabel}.`
     });
 
-    let uploadedImageFileName: string;
+    let fieldValues: Map<string, string>;
     try {
-      uploadedImageFileName = await uploadRunningHubImage({
+      fieldValues = await resolveStudioFieldValues({
+        bindings,
+        job,
         apiKey: options.config.apiKey,
-        imagePath: job.imagePath,
         fetchImpl,
         baseUrl,
         signal: options.signal
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown error";
-      throw new Error(`Could not upload source image for ${job.label}: ${message}`);
+      throw new Error(`Could not prepare Studio inputs for ${job.label}: ${message}`);
     }
 
     options.onStatus?.({
@@ -135,8 +148,9 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
       baseUrl,
       fetchImpl,
       config: options.config,
+      bindings,
       prompt: job.prompt,
-      uploadedImageFileName,
+      fieldValues,
       signal: options.signal
     });
     taskIds.push(taskId);
@@ -211,44 +225,71 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
   return { item, assets: allAssets };
 }
 
-function assertRunningHubConfig(config: RunningHubConfig): void {
+function assertRunningHubConfig(config: RunningHubConfig): RunningHubBinding[] {
   if (!config.apiKey.trim()) {
     throw new Error("Add RunningHub API key on the Подключения tab before image generation.");
   }
   if (!config.workflowId.trim()) {
     throw new Error("Add RunningHub workflow ID on the Подключения tab before image generation.");
   }
-  if (!config.promptNodeId.trim()) {
-    throw new Error("Add RunningHub prompt node ID on the Подключения tab before image generation.");
+  return getRunningHubBindings(config, true);
+}
+
+function getRunningHubBindings(config: {
+  bindings?: RunningHubBinding[];
+  promptNodeId?: string;
+  promptFieldName?: string;
+  imageNodeId?: string;
+  imageFieldName?: string;
+}, validateLegacy = false): RunningHubBinding[] {
+  if (config.bindings && config.bindings.length > 0) {
+    const bindings = normalizeRunningHubBindings(config.bindings);
+    if (bindings.length === 0 && validateLegacy) {
+      throw new Error("Add at least one RunningHub Studio binding on the Настройки tab before generation.");
+    }
+    assertUniqueRunningHubBindings(bindings);
+    return bindings;
   }
-  if (!config.promptFieldName.trim()) {
-    throw new Error("Add RunningHub prompt field name on the Подключения tab before image generation.");
-  }
-  if (!config.imageNodeId.trim()) {
+
+  if (validateLegacy && !config.imageNodeId?.trim()) {
     throw new Error("Add RunningHub image node ID on the Подключения tab before image generation.");
   }
-  if (!config.imageFieldName.trim()) {
+  if (validateLegacy && !config.imageFieldName?.trim()) {
     throw new Error("Add RunningHub image field name on the Подключения tab before image generation.");
   }
+  if (validateLegacy && !config.promptNodeId?.trim()) {
+    throw new Error("Add RunningHub prompt node ID on the Подключения tab before image generation.");
+  }
+  if (validateLegacy && !config.promptFieldName?.trim()) {
+    throw new Error("Add RunningHub prompt field name on the Подключения tab before image generation.");
+  }
+
+  const imageNodeId = config.imageNodeId?.trim();
+  const imageFieldName = config.imageFieldName?.trim();
+  const promptNodeId = config.promptNodeId?.trim();
+  const promptFieldName = config.promptFieldName?.trim();
+  return imageNodeId && imageFieldName && promptNodeId && promptFieldName
+    ? [
+      { nodeId: imageNodeId, fieldName: imageFieldName, studioId: "1" },
+      { nodeId: promptNodeId, fieldName: promptFieldName, studioId: "2" }
+    ]
+    : [];
 }
 
 async function createTask(options: {
   baseUrl: string;
   fetchImpl: FetchLike;
   config: RunningHubConfig;
+  bindings: RunningHubBinding[];
   prompt: string;
-  uploadedImageFileName: string;
+  fieldValues: Map<string, string>;
   signal?: AbortSignal;
 }): Promise<string> {
   const response = await postRunningHub(options.fetchImpl, new URL("/task/openapi/create", options.baseUrl), buildRunningHubCreatePayload({
     apiKey: options.config.apiKey,
     workflowId: options.config.workflowId,
-    promptNodeId: options.config.promptNodeId,
-    promptFieldName: options.config.promptFieldName,
-    imageNodeId: options.config.imageNodeId,
-    imageFieldName: options.config.imageFieldName,
-    uploadedImageFileName: options.uploadedImageFileName,
-    prompt: options.prompt
+    bindings: options.bindings,
+    fieldValues: options.fieldValues
   }), "creating task", options.signal);
   const payload = await response.json() as unknown;
   assertRunningHubOk(payload, "create task");
@@ -284,6 +325,47 @@ export async function uploadRunningHubImage(options: {
     throw new Error(`RunningHub upload source image response did not include data.fileName: ${JSON.stringify(payload)}`);
   }
   return fileName;
+}
+
+async function resolveStudioFieldValues(options: {
+  bindings: RunningHubBinding[];
+  job: RunningHubPromptJob;
+  apiKey: string;
+  fetchImpl: FetchLike;
+  baseUrl: string;
+  signal?: AbortSignal;
+}): Promise<Map<string, string>> {
+  const localFilePaths = new Map<StudioId, string | undefined>([
+    ["1", options.job.imagePath],
+    ["3", options.job.videoPath],
+    ["4", options.job.generatedImagePath]
+  ]);
+  const fieldValues = new Map<StudioId, string>([["2", options.job.prompt]]);
+  const uploadedFiles = new Map<string, string>();
+
+  for (const binding of options.bindings) {
+    if (binding.studioId === "2" || fieldValues.has(binding.studioId)) {
+      continue;
+    }
+    const path = localFilePaths.get(binding.studioId);
+    if (!path) {
+      throw new Error(`Studio ID ${binding.studioId} has no value for this media item.`);
+    }
+    let uploadedFileName = uploadedFiles.get(path);
+    if (!uploadedFileName) {
+      uploadedFileName = await uploadRunningHubImage({
+        apiKey: options.apiKey,
+        imagePath: path,
+        fetchImpl: options.fetchImpl,
+        baseUrl: options.baseUrl,
+        signal: options.signal
+      });
+      uploadedFiles.set(path, uploadedFileName);
+    }
+    fieldValues.set(binding.studioId, uploadedFileName);
+  }
+
+  return fieldValues;
 }
 
 async function waitForTaskCompletion(options: {

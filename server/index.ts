@@ -3,11 +3,12 @@ import { basename, extname, join, relative, resolve } from "node:path";
 import express from "express";
 import type { ImportAsset, ImportItem } from "../src/lib/importTypes";
 import { validateInstagramUrl } from "../src/lib/instagramUrl";
+import { normalizeRunningHubBindings, validateRunningHubBindings } from "../src/lib/studioBindings";
 import { ActivityLog } from "./activityLog";
 import { ConnectionsStore, type ConnectionKeyName } from "./connectionsStore";
 import { type PromptMediaInput } from "./ideogramPrompt";
 import { ImportStore, normalizeCurrentSession } from "./importStore";
-import { checkScrapeCreatorsPostAccess, importInstagramUrl } from "./instagramImporter";
+import { importInstagramUrl } from "./instagramImporter";
 import { resolveImportMetadataPath } from "./localMetadata";
 import { generateOllamaPrompt, listOllamaModels } from "./ollamaClient";
 import { getActiveOllamaConfiguration } from "./ollamaConfiguration";
@@ -29,7 +30,7 @@ app.use(express.json({ limit: "25mb" }));
 app.use("/input", express.static(inputDir));
 app.use("/output", express.static(outputDir));
 
-app.get("/media/imports/:importId/scrapecreators-response.json", async (request, response) => {
+app.get("/media/imports/:importId/apify-media.json", async (request, response) => {
   const metadataPath = resolveImportMetadataPath(dataDir, request.params.importId);
   if (!metadataPath) {
     response.sendStatus(404);
@@ -51,7 +52,7 @@ app.get("/media/imports/:importId/scrapecreators-response.json", async (request,
 app.get("/api/health", (_request, response) => {
   response.json({
     ok: true,
-    importProvider: "scrapecreators",
+    importProvider: "apify",
     version: "0.1.0"
   });
 });
@@ -90,7 +91,7 @@ app.post("/api/imports/upload-image", express.raw({ type: "image/*", limit: "25m
     const path = join(folder, `${id}${extension || ".png"}`);
     await writeFile(path, request.body);
     const imagePath = `/input/${relative(inputDir, path).replaceAll("\\", "/")}`;
-    const item: ImportItem = { id, sourceUrl: `local://${fileName}`, mediaType: "image", status: "ready", createdAt: new Date().toISOString(), title: fileName, provider: "scrapecreators", files: { image: imagePath }, assets: [{ id: "image", mediaType: "image", files: { image: imagePath } }] };
+    const item: ImportItem = { id, sourceUrl: `local://${fileName}`, mediaType: "image", status: "ready", createdAt: new Date().toISOString(), title: fileName, provider: "local", files: { image: imagePath }, assets: [{ id: "image", mediaType: "image", files: { image: imagePath } }] };
     await store.saveItem(item);
     const appendToSession = request.get("X-Append-To-Session") === "true";
     if (appendToSession) await store.appendToCurrentSession(item.id);
@@ -121,10 +122,7 @@ app.put("/api/connections", async (request, response) => {
       generationPrefixOptions: optionalString(request.body?.generationPrefixOptions),
       generationPrefixSelection: optionalString(request.body?.generationPrefixSelection),
       runningHubWorkflowId: optionalString(request.body?.runningHubWorkflowId),
-      runningHubPromptNodeId: optionalString(request.body?.runningHubPromptNodeId),
-      runningHubPromptFieldName: optionalString(request.body?.runningHubPromptFieldName),
-      runningHubImageNodeId: optionalString(request.body?.runningHubImageNodeId),
-      runningHubImageFieldName: optionalString(request.body?.runningHubImageFieldName)
+      runningHubBindings: parseRunningHubBindings(request.body?.runningHubBindings)
     });
     response.json(await connectionsStore.readPublic());
   } catch (error) {
@@ -176,7 +174,6 @@ app.post("/api/imports", async (request, response) => {
     response.status(400).json({ error: validation.message });
     return;
   }
-
   try {
     activityLog.publish({ tone: "running", source: "import", message: `Import started: ${validation.url}` });
     if (!forceRefresh) {
@@ -194,7 +191,7 @@ app.post("/api/imports", async (request, response) => {
     const item = await importInstagramUrl(validation.url, {
       dataDir,
       inputDir,
-      scrapeCreatorsApiKey: connections.scrapeCreatorsApiKey ?? ""
+      apifyApiToken: connections.apifyApiToken ?? ""
     });
     await store.saveItem(item);
     await store.startCurrentSession(item.id);
@@ -251,33 +248,6 @@ app.put("/api/imports/session/prompts", async (request, response) => {
   }
 });
 
-app.post("/api/imports/check", async (request, response) => {
-  const url = String(request.body?.url ?? "");
-  const validation = validateInstagramUrl(url);
-
-  if (!validation.ok) {
-    response.status(400).json({ error: validation.message });
-    return;
-  }
-
-  try {
-    const connections = await connectionsStore.readPrivate();
-    const result = await checkScrapeCreatorsPostAccess(validation.url, connections.scrapeCreatorsApiKey ?? "");
-    response.json({
-      ok: true,
-      sourceUrl: result.sourceUrl,
-      provider: "scrapecreators"
-    });
-  } catch (error) {
-    response.status(422).json({
-      ok: false,
-      sourceUrl: validation.url,
-      provider: "scrapecreators",
-      error: toErrorMessage(error)
-    });
-  }
-});
-
 app.post("/api/open-imports-folder", async (_request, response) => {
   try {
     await mkdir(outputDir, { recursive: true });
@@ -317,7 +287,7 @@ app.post("/api/generation/image-prompts", async (request, response) => {
           apiKey: ollama.apiKey,
           model: ollama.model,
           prompt: ollama.instruction,
-          imageBase64: await readFile(resolvePromptMediaImagePath(mediaItem.imagePath), "base64"),
+          imageBase64: await readFile(resolveStudioMediaPath(mediaItem.imagePath), "base64"),
           signal: generation.signal
         })
       };
@@ -357,6 +327,7 @@ app.post("/api/generation/images", async (request, response) => {
   let generation: GenerationOperation | undefined;
   try {
     const jobs = parseRunningHubPromptJobs(request.body?.jobs);
+    const batch = parseRunningHubGenerationBatch(request.body?.batchPosition, request.body?.batchTotal, jobs.length);
     const activeGeneration = generationController.start();
     generation = activeGeneration;
     const connections = await connectionsStore.readPrivate();
@@ -364,7 +335,7 @@ app.post("/api/generation/images", async (request, response) => {
     activityLog.publish({
       tone: "running",
       source: "generation",
-      message: `RunningHub image generation started for ${jobs.length} media item(s).`
+      message: `RunningHub image generation started for ${batch.batchPosition}/${batch.batchTotal}.`
     });
 
     const runningHubResult = await runRunningHubImageGeneration({
@@ -372,15 +343,18 @@ app.post("/api/generation/images", async (request, response) => {
       config: {
         apiKey: connections.runningHubApiKey ?? "",
         workflowId: connections.runningHubWorkflowId ?? "",
-        promptNodeId: connections.runningHubPromptNodeId ?? "",
-        promptFieldName: connections.runningHubPromptFieldName ?? "",
-        imageNodeId: connections.runningHubImageNodeId ?? "",
-        imageFieldName: connections.runningHubImageFieldName ?? ""
+        bindings: normalizeRunningHubBindings(connections.runningHubBindings),
+        promptNodeId: connections.runningHubPromptNodeId,
+        promptFieldName: connections.runningHubPromptFieldName,
+        imageNodeId: connections.runningHubImageNodeId,
+        imageFieldName: connections.runningHubImageFieldName
       },
       jobs: jobs.map((job) => ({
         mediaId: job.media.id,
         label: job.media.label,
-        imagePath: resolvePromptMediaImagePath(job.media.imagePath),
+        imagePath: job.media.generatedImagePath ? undefined : resolveStudioMediaPath(job.media.imagePath),
+        videoPath: job.media.videoPath ? resolveStudioMediaPath(job.media.videoPath) : undefined,
+        generatedImagePath: job.media.generatedImagePath ? resolveStudioMediaPath(job.media.generatedImagePath) : undefined,
         prompt: job.prompt
       })),
       onStatus: (event) => activityLog.publish(event),
@@ -388,7 +362,9 @@ app.post("/api/generation/images", async (request, response) => {
       onTaskCreated: (taskId) => activeGeneration.registerRunningHubTask({
         apiKey: connections.runningHubApiKey ?? "",
         taskId
-      })
+      }),
+      batchPosition: batch.batchPosition,
+      batchTotal: batch.batchTotal
     });
     generation.throwIfCancelled();
     await store.saveItem(runningHubResult.item);
@@ -471,22 +447,33 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function parseRunningHubBindings(value: unknown) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return validateRunningHubBindings(value);
+}
+
 function parseConnectionKeyName(value: unknown): ConnectionKeyName {
-  if (value === "scrapeCreatorsApiKey" || value === "ollamaCloudApiKey" || value === "runningHubApiKey") {
+  if (value === "apifyApiToken" || value === "ollamaCloudApiKey" || value === "runningHubApiKey") {
     return value;
   }
   throw new Error("Unknown connection key.");
 }
 
-function resolvePromptMediaImagePath(imagePath: string): string {
-  const inputPrefix = "/input/";
-  if (!imagePath.startsWith(inputPrefix)) {
-    throw new Error("Selected media image must come from the local input folder.");
+function resolveStudioMediaPath(mediaPath: string): string {
+  const permittedRoots = [
+    { publicPrefix: "/input/", localRoot: inputDir },
+    { publicPrefix: "/output/", localRoot: outputDir }
+  ];
+  const permittedRoot = permittedRoots.find((candidate) => mediaPath.startsWith(candidate.publicPrefix));
+  if (!permittedRoot) {
+    throw new Error("Studio media must reference a local input or output file.");
   }
-  const resolvedPath = resolve(inputDir, imagePath.slice(inputPrefix.length));
-  const pathFromInput = relative(inputDir, resolvedPath);
-  if (pathFromInput.startsWith("..") || pathFromInput === "") {
-    throw new Error("Selected media image must stay inside the local input folder.");
+  const resolvedPath = resolve(permittedRoot.localRoot, mediaPath.slice(permittedRoot.publicPrefix.length));
+  const pathFromRoot = relative(permittedRoot.localRoot, resolvedPath);
+  if (pathFromRoot.startsWith("..") || pathFromRoot === "") {
+    throw new Error("Studio media path must stay inside the permitted local folder.");
   }
   return resolvedPath;
 }
@@ -528,6 +515,8 @@ function parsePromptMedia(value: unknown): PromptMediaInput[] {
     const id = typeof record.id === "string" ? record.id : "";
     const label = typeof record.label === "string" ? record.label : "";
     const imagePath = typeof record.imagePath === "string" ? record.imagePath : "";
+    const videoPath = typeof record.videoPath === "string" ? record.videoPath : undefined;
+    const generatedImagePath = typeof record.generatedImagePath === "string" ? record.generatedImagePath : undefined;
     const sourceKind = record.sourceKind === "video-first-frame" ? "video-first-frame" : "photo";
     const caption = typeof record.caption === "string" ? record.caption : undefined;
 
@@ -535,7 +524,7 @@ function parsePromptMedia(value: unknown): PromptMediaInput[] {
       throw new Error(`Prompt media item ${index + 1} must include id, label, and imagePath.`);
     }
 
-    return { id, label, imagePath, sourceKind, caption };
+    return { id, label, imagePath, videoPath, generatedImagePath, sourceKind, caption };
   });
 }
 
@@ -571,4 +560,19 @@ function parseRunningHubPromptJobs(value: unknown): Array<{ media: PromptMediaIn
     const [media] = parsePromptMedia([record.media]);
     return { media, prompt };
   });
+}
+
+function parseRunningHubGenerationBatch(batchPositionValue: unknown, batchTotalValue: unknown, jobsLength: number): { batchPosition: number; batchTotal: number } {
+  if (batchPositionValue === undefined && batchTotalValue === undefined) {
+    return { batchPosition: 1, batchTotal: jobsLength };
+  }
+  if (!Number.isInteger(batchPositionValue) || !Number.isInteger(batchTotalValue)) {
+    throw new Error("Image generation progress must include integer batchPosition and batchTotal values.");
+  }
+  const batchPosition = batchPositionValue as number;
+  const batchTotal = batchTotalValue as number;
+  if (batchPosition < 1 || batchTotal < batchPosition || batchPosition + jobsLength - 1 > batchTotal) {
+    throw new Error("Image generation progress is outside the requested batch.");
+  }
+  return { batchPosition, batchTotal };
 }

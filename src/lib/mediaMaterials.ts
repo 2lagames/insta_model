@@ -30,20 +30,6 @@ export function createMediaMaterials(item: ImportItem): MediaMaterial[] {
     : [{ id: "media", mediaType: item.mediaType === "video" ? "video" : "image", files: item.files } satisfies ImportAsset];
 
   for (const asset of assets) {
-    if (asset.files.video) {
-      addMaterial({
-        id: `${item.id}:${asset.id}:video`,
-        importItem: item,
-        mediaType: "video",
-        label: "Video",
-        files: {
-          video: asset.files.video,
-          firstFrame: asset.files.firstFrame,
-          thumbnail: asset.files.thumbnail ?? asset.files.firstFrame
-        }
-      });
-    }
-
     if (asset.files.firstFrame) {
       addMaterial({
         id: `${item.id}:${asset.id}:first-frame`,
@@ -52,6 +38,7 @@ export function createMediaMaterials(item: ImportItem): MediaMaterial[] {
         label: "First frame",
         files: {
           image: asset.files.firstFrame,
+          video: asset.files.video,
           thumbnail: asset.files.firstFrame
         }
       });
@@ -64,6 +51,21 @@ export function createMediaMaterials(item: ImportItem): MediaMaterial[] {
         files: {
           image: asset.files.image,
           thumbnail: asset.files.thumbnail ?? asset.files.image
+        }
+      });
+    }
+
+    if (asset.files.video) {
+      addMaterial({
+        id: `${item.id}:${asset.id}:video`,
+        importItem: item,
+        mediaType: "video",
+        label: "Reel",
+        files: {
+          image: asset.files.firstFrame,
+          video: asset.files.video,
+          firstFrame: asset.files.firstFrame,
+          thumbnail: asset.files.thumbnail ?? asset.files.firstFrame
         }
       });
     }

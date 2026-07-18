@@ -8,7 +8,7 @@ export function resolveImportMetadataPath(dataDir: string, importId: string): st
   }
 
   const importsDir = resolve(dataDir, "imports");
-  const metadataPath = resolve(importsDir, importId, "scrapecreators-response.json");
+  const metadataPath = resolve(importsDir, importId, "apify-media.json");
   const pathFromImports = relative(importsDir, metadataPath);
   if (pathFromImports.startsWith("..") || isAbsolute(pathFromImports)) {
     return undefined;

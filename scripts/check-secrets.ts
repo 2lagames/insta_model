@@ -61,7 +61,7 @@ function gitPaths(args: string[]): string[] {
 function readLocalSecrets(): string[] {
   try {
     const connections = JSON.parse(readFileSync("data/connections.local.json", "utf8")) as Record<string, unknown>;
-    return ["scrapeCreatorsApiKey", "ollamaCloudApiKey", "runningHubApiKey"]
+    return ["apifyApiToken", "ollamaCloudApiKey", "runningHubApiKey"]
       .flatMap((name) => typeof connections[name] === "string" ? [connections[name].trim()] : [])
       .filter(Boolean);
   } catch {

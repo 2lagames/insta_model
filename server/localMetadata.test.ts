@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { resolveImportMetadataPath } from "./localMetadata";
 
 describe("resolveImportMetadataPath", () => {
-  it("resolves the allowlisted ScrapeCreators response for a normal import id", () => {
+  it("resolves the allowlisted Apify media manifest for a normal import id", () => {
     expect(resolveImportMetadataPath("/project/data", "20260715-abc123")).toBe(
-      resolve("/project/data/imports/20260715-abc123/scrapecreators-response.json")
+      resolve("/project/data/imports/20260715-abc123/apify-media.json")
     );
   });
 

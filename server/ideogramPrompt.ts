@@ -13,6 +13,8 @@ export type PromptMediaInput = {
   id: string;
   label: string;
   imagePath: string;
+  videoPath?: string;
+  generatedImagePath?: string;
   sourceKind: "photo" | "video-first-frame";
   caption?: string;
   sceneBibleId?: string;
