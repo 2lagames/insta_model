@@ -3,7 +3,7 @@ import type { ImportItem } from "./importTypes";
 import { createMediaMaterials, createSessionMediaMaterials } from "./mediaMaterials";
 
 describe("createMediaMaterials", () => {
-  it("represents a Reel as one selectable material with both its video and first frame", () => {
+  it("creates separate video and first-frame materials for a Reel", () => {
     const item: ImportItem = {
       id: "post-1",
       sourceUrl: "https://www.instagram.com/p/example/",
@@ -32,9 +32,10 @@ describe("createMediaMaterials", () => {
 
     expect(createMediaMaterials(item).map((material) => material.id)).toEqual([
       "post-1:asset-1:image",
-      "post-1:asset-2:video"
+      "post-1:asset-2:video",
+      "post-1:asset-2:first-frame"
     ]);
-    expect(createMediaMaterials(item)[1]?.files).toMatchObject({
+    expect(createMediaMaterials(item)[2]?.files).toMatchObject({
       image: "/input/20260626/post-1/video-001-first-frame.jpg",
       video: "/input/20260626/post-1/video-001.mp4"
     });
@@ -68,7 +69,8 @@ describe("createSessionMediaMaterials", () => {
     expect(createSessionMediaMaterials([imageItem, videoItem], ["post-1", "post-2"], imageItem, false).map((material) => material.label)).toEqual([
       "IMAGE 1",
       "IMAGE 2",
-      "Reel"
+      "Reel",
+      "IMAGE 3"
     ]);
   });
 });

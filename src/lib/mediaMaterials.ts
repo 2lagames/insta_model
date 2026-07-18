@@ -43,7 +43,6 @@ export function createMediaMaterials(item: ImportItem): MediaMaterial[] {
           thumbnail: asset.files.thumbnail ?? asset.files.firstFrame
         }
       });
-      continue;
     }
 
     if (asset.files.firstFrame) {
@@ -54,6 +53,7 @@ export function createMediaMaterials(item: ImportItem): MediaMaterial[] {
         label: "First frame",
         files: {
           image: asset.files.firstFrame,
+          video: asset.files.video,
           thumbnail: asset.files.firstFrame
         }
       });

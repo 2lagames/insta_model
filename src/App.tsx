@@ -1138,7 +1138,6 @@ function MediaSelector({
             <button className="gallery-preview" onClick={() => onSelect(material)} type="button">
               <GalleryThumb material={material} />
               <span>{material.label}</span>
-              <span className="studio-id">Studio ID {getMaterialStudioId(material)}</span>
             </button>
             <label className="gallery-select">
               <input checked={selectedForGeneration.includes(material.id)} onChange={() => onToggle(material.id)} type="checkbox" />
@@ -1182,7 +1181,7 @@ function PromptEditors({
       {documents.map((document) => (
         <article className="prompt-editor-card" key={document.mediaId}>
           <div className="prompt-editor-header">
-            <strong>Промт · Studio ID 2: {materialById.get(document.mediaId)?.label ?? document.label}</strong>
+            <strong>Промт: {materialById.get(document.mediaId)?.label ?? document.label}</strong>
             <div className="prompt-editor-actions">
               <button aria-label="Отменить изменение промта" disabled={isBusy || document.historyIndex === 0} onClick={() => onUndo(document.mediaId)} type="button">↶</button>
                <button aria-label="Повторить изменение промта" disabled={isBusy || document.historyIndex === document.history.length - 1} onClick={() => onRedo(document.mediaId)} type="button">↷</button>
@@ -1275,11 +1274,6 @@ function getStudioIdLabel(studioId: RunningHubBinding["studioId"]): string {
   if (studioId === "2") return "2 · Prompt";
   if (studioId === "3") return "3 · Source video";
   return "4 · Generated image";
-}
-
-function getMaterialStudioId(material: MediaMaterial): string {
-  if (material.importItem.provider === "runninghub") return "4";
-  return material.mediaType === "video" ? "1, 3" : "1";
 }
 
 function LogPanel({

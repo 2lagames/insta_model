@@ -122,6 +122,9 @@ describe("studio preview layout", () => {
     expect(preview).not.toContain(">Info</div>");
     expect(preview).toContain("sourceMaterials");
     expect(preview).toContain("generatedMaterials");
+    expect(preview).not.toContain("Studio ID");
+    expect(preview).toContain('className="media-column generated-media-column"');
+    expect(readFileSync("src/App.css", "utf8")).toContain(".generated-media-column .gallery-item {");
   });
 
   it("saves only completed workflow bindings so an empty draft cannot overwrite saved rules", () => {
