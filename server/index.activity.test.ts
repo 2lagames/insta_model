@@ -126,6 +126,13 @@ describe("image prompt activity", () => {
     expect(importRoute).not.toContain('getInstagramSourceKind(validation.url) === "reel"');
   });
 
+  it("preserves saved RunningHub bindings when unrelated connection fields are updated", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+
+    expect(source).toContain("runningHubBindings: parseRunningHubBindings(request.body?.runningHubBindings)");
+    expect(source).toContain("if (!Array.isArray(value))");
+  });
+
   it("runs RunningHub only with submitted media and edited prompts", () => {
     const source = readFileSync("server/index.ts", "utf8");
     const imageRouteStart = source.indexOf('app.post("/api/generation/images"');
@@ -134,7 +141,8 @@ describe("image prompt activity", () => {
     expect(imageRoute).toContain("parseRunningHubPromptJobs(request.body?.jobs)");
     expect(imageRoute).not.toContain("generateIdeogramPromptForMedia");
     expect(imageRoute).not.toContain("workflowJson");
-    expect(imageRoute).toContain("imagePath: resolvePromptMediaImagePath(job.media.imagePath)");
+    expect(imageRoute).toContain("imagePath: job.media.generatedImagePath ? undefined : resolveStudioMediaPath(job.media.imagePath)");
+    expect(imageRoute).toContain("videoPath: job.media.videoPath ? resolveStudioMediaPath(job.media.videoPath) : undefined");
     expect(imageRoute).toContain("onTaskCreated");
     expect(imageRoute).toContain("activeGeneration.registerRunningHubTask");
   });

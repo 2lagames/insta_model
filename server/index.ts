@@ -3,6 +3,7 @@ import { basename, extname, join, relative, resolve } from "node:path";
 import express from "express";
 import type { ImportAsset, ImportItem } from "../src/lib/importTypes";
 import { validateInstagramUrl } from "../src/lib/instagramUrl";
+import { assertUniqueRunningHubBindings, normalizeRunningHubBindings } from "../src/lib/studioBindings";
 import { ActivityLog } from "./activityLog";
 import { ConnectionsStore, type ConnectionKeyName } from "./connectionsStore";
 import { type PromptMediaInput } from "./ideogramPrompt";
@@ -121,10 +122,7 @@ app.put("/api/connections", async (request, response) => {
       generationPrefixOptions: optionalString(request.body?.generationPrefixOptions),
       generationPrefixSelection: optionalString(request.body?.generationPrefixSelection),
       runningHubWorkflowId: optionalString(request.body?.runningHubWorkflowId),
-      runningHubPromptNodeId: optionalString(request.body?.runningHubPromptNodeId),
-      runningHubPromptFieldName: optionalString(request.body?.runningHubPromptFieldName),
-      runningHubImageNodeId: optionalString(request.body?.runningHubImageNodeId),
-      runningHubImageFieldName: optionalString(request.body?.runningHubImageFieldName)
+      runningHubBindings: parseRunningHubBindings(request.body?.runningHubBindings)
     });
     response.json(await connectionsStore.readPublic());
   } catch (error) {
@@ -289,7 +287,7 @@ app.post("/api/generation/image-prompts", async (request, response) => {
           apiKey: ollama.apiKey,
           model: ollama.model,
           prompt: ollama.instruction,
-          imageBase64: await readFile(resolvePromptMediaImagePath(mediaItem.imagePath), "base64"),
+          imageBase64: await readFile(resolveStudioMediaPath(mediaItem.imagePath), "base64"),
           signal: generation.signal
         })
       };
@@ -344,15 +342,18 @@ app.post("/api/generation/images", async (request, response) => {
       config: {
         apiKey: connections.runningHubApiKey ?? "",
         workflowId: connections.runningHubWorkflowId ?? "",
-        promptNodeId: connections.runningHubPromptNodeId ?? "",
-        promptFieldName: connections.runningHubPromptFieldName ?? "",
-        imageNodeId: connections.runningHubImageNodeId ?? "",
-        imageFieldName: connections.runningHubImageFieldName ?? ""
+        bindings: normalizeRunningHubBindings(connections.runningHubBindings),
+        promptNodeId: connections.runningHubPromptNodeId,
+        promptFieldName: connections.runningHubPromptFieldName,
+        imageNodeId: connections.runningHubImageNodeId,
+        imageFieldName: connections.runningHubImageFieldName
       },
       jobs: jobs.map((job) => ({
         mediaId: job.media.id,
         label: job.media.label,
-        imagePath: resolvePromptMediaImagePath(job.media.imagePath),
+        imagePath: job.media.generatedImagePath ? undefined : resolveStudioMediaPath(job.media.imagePath),
+        videoPath: job.media.videoPath ? resolveStudioMediaPath(job.media.videoPath) : undefined,
+        generatedImagePath: job.media.generatedImagePath ? resolveStudioMediaPath(job.media.generatedImagePath) : undefined,
         prompt: job.prompt
       })),
       onStatus: (event) => activityLog.publish(event),
@@ -443,6 +444,15 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function parseRunningHubBindings(value: unknown) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const bindings = normalizeRunningHubBindings(value);
+  assertUniqueRunningHubBindings(bindings);
+  return bindings;
+}
+
 function parseConnectionKeyName(value: unknown): ConnectionKeyName {
   if (value === "apifyApiToken" || value === "ollamaCloudApiKey" || value === "runningHubApiKey") {
     return value;
@@ -450,15 +460,19 @@ function parseConnectionKeyName(value: unknown): ConnectionKeyName {
   throw new Error("Unknown connection key.");
 }
 
-function resolvePromptMediaImagePath(imagePath: string): string {
-  const inputPrefix = "/input/";
-  if (!imagePath.startsWith(inputPrefix)) {
-    throw new Error("Selected media image must come from the local input folder.");
+function resolveStudioMediaPath(mediaPath: string): string {
+  const permittedRoots = [
+    { publicPrefix: "/input/", localRoot: inputDir },
+    { publicPrefix: "/output/", localRoot: outputDir }
+  ];
+  const permittedRoot = permittedRoots.find((candidate) => mediaPath.startsWith(candidate.publicPrefix));
+  if (!permittedRoot) {
+    throw new Error("Studio media must reference a local input or output file.");
   }
-  const resolvedPath = resolve(inputDir, imagePath.slice(inputPrefix.length));
-  const pathFromInput = relative(inputDir, resolvedPath);
-  if (pathFromInput.startsWith("..") || pathFromInput === "") {
-    throw new Error("Selected media image must stay inside the local input folder.");
+  const resolvedPath = resolve(permittedRoot.localRoot, mediaPath.slice(permittedRoot.publicPrefix.length));
+  const pathFromRoot = relative(permittedRoot.localRoot, resolvedPath);
+  if (pathFromRoot.startsWith("..") || pathFromRoot === "") {
+    throw new Error("Studio media path must stay inside the permitted local folder.");
   }
   return resolvedPath;
 }
@@ -500,6 +514,8 @@ function parsePromptMedia(value: unknown): PromptMediaInput[] {
     const id = typeof record.id === "string" ? record.id : "";
     const label = typeof record.label === "string" ? record.label : "";
     const imagePath = typeof record.imagePath === "string" ? record.imagePath : "";
+    const videoPath = typeof record.videoPath === "string" ? record.videoPath : undefined;
+    const generatedImagePath = typeof record.generatedImagePath === "string" ? record.generatedImagePath : undefined;
     const sourceKind = record.sourceKind === "video-first-frame" ? "video-first-frame" : "photo";
     const caption = typeof record.caption === "string" ? record.caption : undefined;
 
@@ -507,7 +523,7 @@ function parsePromptMedia(value: unknown): PromptMediaInput[] {
       throw new Error(`Prompt media item ${index + 1} must include id, label, and imagePath.`);
     }
 
-    return { id, label, imagePath, sourceKind, caption };
+    return { id, label, imagePath, videoPath, generatedImagePath, sourceKind, caption };
   });
 }
 

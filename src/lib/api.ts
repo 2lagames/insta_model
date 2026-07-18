@@ -1,5 +1,6 @@
 import type { CurrentMediaSession, ImportItem } from "./importTypes";
 import type { PromptMediaInput } from "./promptTypes";
+import type { RunningHubBinding } from "./studioBindings";
 
 type ImportsResponse = {
   items: ImportItem[];
@@ -89,10 +90,7 @@ export type ConnectionSaveInput = {
   generationPrefixOptions?: string;
   generationPrefixSelection?: string;
   runningHubWorkflowId?: string;
-  runningHubPromptNodeId?: string;
-  runningHubPromptFieldName?: string;
-  runningHubImageNodeId?: string;
-  runningHubImageFieldName?: string;
+  runningHubBindings?: RunningHubBinding[];
 };
 
 export type HealthResponse = {
@@ -115,10 +113,7 @@ export type PublicConnections = {
   hasRunningHubApiKey: boolean;
   runningHubApiKeyPreview?: string;
   runningHubWorkflowId?: string;
-  runningHubPromptNodeId?: string;
-  runningHubPromptFieldName?: string;
-  runningHubImageNodeId?: string;
-  runningHubImageFieldName?: string;
+  runningHubBindings?: RunningHubBinding[];
 };
 
 export async function listImports(): Promise<ImportsSessionResponse> {

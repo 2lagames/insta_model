@@ -11,6 +11,29 @@ import {
 } from "./runningHub";
 
 describe("buildRunningHubCreatePayload", () => {
+  it("builds workflow overrides from any configured Studio ID binding", () => {
+    const payload = buildRunningHubCreatePayload({
+      apiKey: "rh_api_key",
+      workflowId: "workflow",
+      bindings: [
+        { nodeId: "39", fieldName: "image", studioId: "1" },
+        { nodeId: "18", fieldName: "video", studioId: "3" },
+        { nodeId: "6", fieldName: "text", studioId: "2" }
+      ],
+      fieldValues: new Map([
+        ["1", "api/source.png"],
+        ["2", "A cinematic scene"],
+        ["3", "api/source.mp4"]
+      ])
+    });
+
+    expect(payload.nodeInfoList).toEqual([
+      { nodeId: "39", fieldName: "image", fieldValue: "api/source.png" },
+      { nodeId: "18", fieldName: "video", fieldValue: "api/source.mp4" },
+      { nodeId: "6", fieldName: "text", fieldValue: "A cinematic scene" }
+    ]);
+  });
+
   it("builds a RunningHub advanced workflow request with image and prompt node overrides", () => {
     const payload = buildRunningHubCreatePayload({
       apiKey: "rh_api_key",
@@ -64,6 +87,91 @@ describe("cancelRunningHubTask", () => {
 
 describe("runRunningHubImageGeneration", () => {
   const sourceImagePath = fileURLToPath(import.meta.url);
+
+  it("uploads a Reel video when a Studio ID 3 binding is configured", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "runninghub-video-"));
+    const imagePath = join(tempDir, "frame.jpg");
+    const videoPath = join(tempDir, "reel.mp4");
+    const uploadedFileNames: string[] = [];
+
+    await writeFile(imagePath, "image");
+    await writeFile(videoPath, "video");
+    const fetchImpl = (async (url: URL | RequestInfo, init?: RequestInit) => {
+      const requestUrl = new URL(String(url));
+      if (requestUrl.pathname.endsWith("/task/openapi/upload")) {
+        const form = init?.body as FormData;
+        const file = form.get("file") as File;
+        uploadedFileNames.push(file.name);
+        return new Response(JSON.stringify({ code: 0, data: { fileName: `api/${file.name}` } }));
+      }
+      if (requestUrl.pathname.endsWith("/task/openapi/create")) {
+        expect(JSON.parse(String(init?.body)).nodeInfoList).toEqual([
+          { nodeId: "39", fieldName: "image", fieldValue: "api/frame.jpg" },
+          { nodeId: "18", fieldName: "video", fieldValue: "api/reel.mp4" },
+          { nodeId: "6", fieldName: "text", fieldValue: "A Reel prompt" }
+        ]);
+        return new Response(JSON.stringify({ code: 0, data: { taskId: "task-1" } }));
+      }
+      if (requestUrl.pathname.endsWith("/task/openapi/status")) {
+        return new Response(JSON.stringify({ code: 0, data: { status: "SUCCESS" } }));
+      }
+      if (requestUrl.pathname.endsWith("/task/openapi/outputs")) {
+        return new Response(JSON.stringify({ code: 0, data: [{ fileUrl: "https://cdn.example.com/result.png" }] }));
+      }
+      if (requestUrl.hostname === "cdn.example.com") {
+        return new Response(Buffer.from("png"));
+      }
+      throw new Error(`Unexpected request: ${requestUrl.toString()}`);
+    }) as typeof fetch;
+
+    try {
+      await runRunningHubImageGeneration({
+        outputDir: join(tempDir, "output"),
+        baseUrl: "https://runninghub.example.com",
+        fetchImpl,
+        config: {
+          apiKey: "rh_api_key",
+          workflowId: "workflow",
+          bindings: [
+            { nodeId: "39", fieldName: "image", studioId: "1" },
+            { nodeId: "18", fieldName: "video", studioId: "3" },
+            { nodeId: "6", fieldName: "text", studioId: "2" }
+          ]
+        },
+        jobs: [{ mediaId: "reel", label: "First frame", imagePath, videoPath, prompt: "A Reel prompt" }]
+      });
+
+      expect(uploadedFileNames).toEqual(["frame.jpg", "reel.mp4"]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a configured Studio ID that the selected media does not provide before task creation", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "runninghub-missing-id-"));
+    let requestCount = 0;
+    const fetchImpl = (async () => {
+      requestCount += 1;
+      return new Response("unexpected");
+    }) as typeof fetch;
+
+    try {
+      await expect(runRunningHubImageGeneration({
+        outputDir: join(tempDir, "output"),
+        fetchImpl,
+        config: {
+          apiKey: "rh_api_key",
+          workflowId: "workflow",
+          bindings: [{ nodeId: "18", fieldName: "video", studioId: "3" }]
+        },
+        jobs: [{ mediaId: "photo", label: "Image", imagePath: sourceImagePath, prompt: "Prompt" }]
+      })).rejects.toThrow("Studio ID 3 has no value");
+
+      expect(requestCount).toBe(0);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
 
   it("uploads the source image before creating a task with both node overrides", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "runninghub-"));

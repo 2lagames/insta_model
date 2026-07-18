@@ -84,8 +84,47 @@ describe("ConnectionsStore", () => {
       runningHubApiKeyPreview: "**********************7890",
       runningHubWorkflowId: "1904136902449209346",
       runningHubPromptNodeId: "6",
+      runningHubPromptFieldName: "text",
+      runningHubBindings: [{ nodeId: "6", fieldName: "text", studioId: "2" }]
+    });
+  });
+
+  it("exposes legacy image and prompt settings as configurable Studio ID bindings", async () => {
+    const store = new ConnectionsStore(tempDir);
+
+    await store.save({
+      runningHubImageNodeId: "39",
+      runningHubImageFieldName: "image",
+      runningHubPromptNodeId: "6",
       runningHubPromptFieldName: "text"
     });
+
+    await expect(store.readPublic()).resolves.toMatchObject({
+      runningHubBindings: [
+        { nodeId: "39", fieldName: "image", studioId: "1" },
+        { nodeId: "6", fieldName: "text", studioId: "2" }
+      ]
+    });
+
+    await store.save({ runningHubBindings: [{ nodeId: "44", fieldName: "image", studioId: "4" }] });
+
+    await expect(store.readPrivate()).resolves.toEqual({
+      runningHubBindings: [{ nodeId: "44", fieldName: "image", studioId: "4" }]
+    });
+  });
+
+  it("persists a configurable list of RunningHub Studio ID bindings", async () => {
+    const store = new ConnectionsStore(tempDir);
+    const runningHubBindings = [
+      { nodeId: "39", fieldName: "image", studioId: "1" as const },
+      { nodeId: "18", fieldName: "video", studioId: "3" as const },
+      { nodeId: "6", fieldName: "text", studioId: "2" as const }
+    ];
+
+    await store.save({ runningHubBindings });
+
+    await expect(store.readPrivate()).resolves.toMatchObject({ runningHubBindings });
+    await expect(store.readPublic()).resolves.toMatchObject({ runningHubBindings });
   });
 
   it("stores Ollama provider settings and clears only the requested API key", async () => {

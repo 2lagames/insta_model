@@ -1,6 +1,7 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { defaultPromptInstruction } from "./ideogramPrompt";
+import { legacyRunningHubBindings, normalizeRunningHubBindings, type RunningHubBinding } from "../src/lib/studioBindings";
 
 export type PrivateConnections = {
   apifyApiToken?: string;
@@ -17,6 +18,7 @@ export type PrivateConnections = {
   runningHubPromptFieldName?: string;
   runningHubImageNodeId?: string;
   runningHubImageFieldName?: string;
+  runningHubBindings?: RunningHubBinding[];
 };
 
 export type ConnectionKeyName = "apifyApiToken" | "ollamaCloudApiKey" | "runningHubApiKey";
@@ -39,6 +41,7 @@ export type PublicConnections = {
   runningHubPromptFieldName?: string;
   runningHubImageNodeId?: string;
   runningHubImageFieldName?: string;
+  runningHubBindings?: RunningHubBinding[];
 };
 
 export class ConnectionsStore {
@@ -67,6 +70,11 @@ export class ConnectionsStore {
     const ollamaCloudApiKey = connections.ollamaCloudApiKey?.trim();
     const runningHubApiKey = connections.runningHubApiKey?.trim();
 
+    const runningHubBindings = normalizeRunningHubBindings(connections.runningHubBindings);
+    const migratedRunningHubBindings = runningHubBindings.length > 0
+      ? runningHubBindings
+      : legacyRunningHubBindings(connections);
+
     return {
       hasApifyApiToken: Boolean(apifyApiToken),
       ...(apifyApiToken ? { apifyApiTokenPreview: maskSecret(apifyApiToken) } : {}),
@@ -84,7 +92,8 @@ export class ConnectionsStore {
       ...(connections.runningHubPromptNodeId ? { runningHubPromptNodeId: connections.runningHubPromptNodeId } : {}),
       ...(connections.runningHubPromptFieldName ? { runningHubPromptFieldName: connections.runningHubPromptFieldName } : {}),
       ...(connections.runningHubImageNodeId ? { runningHubImageNodeId: connections.runningHubImageNodeId } : {}),
-      ...(connections.runningHubImageFieldName ? { runningHubImageFieldName: connections.runningHubImageFieldName } : {})
+      ...(connections.runningHubImageFieldName ? { runningHubImageFieldName: connections.runningHubImageFieldName } : {}),
+      ...(migratedRunningHubBindings.length > 0 ? { runningHubBindings: migratedRunningHubBindings } : {})
     };
   }
 
@@ -110,8 +119,9 @@ export class ConnectionsStore {
     const ollamaCloudApiKey = normalizeSecret(next.ollamaCloudApiKey, current.ollamaCloudApiKey);
     const runningHubApiKey = normalizeSecret(next.runningHubApiKey, current.runningHubApiKey);
     const runningHubWorkflowId = normalizeSetting(next.runningHubWorkflowId, current.runningHubWorkflowId);
-    const runningHubPromptNodeId = normalizeSetting(next.runningHubPromptNodeId, current.runningHubPromptNodeId);
-    const runningHubPromptFieldName = normalizeSetting(next.runningHubPromptFieldName, current.runningHubPromptFieldName);
+    const hasRunningHubBindingsUpdate = next.runningHubBindings !== undefined;
+    const runningHubPromptNodeId = hasRunningHubBindingsUpdate ? undefined : normalizeSetting(next.runningHubPromptNodeId, current.runningHubPromptNodeId);
+    const runningHubPromptFieldName = hasRunningHubBindingsUpdate ? undefined : normalizeSetting(next.runningHubPromptFieldName, current.runningHubPromptFieldName);
     const ollamaProvider = next.ollamaProvider ?? current.ollamaProvider;
     const ollamaCloudModel = normalizeSetting(next.ollamaCloudModel, current.ollamaCloudModel);
     const ollamaLocalModel = normalizeSetting(next.ollamaLocalModel, current.ollamaLocalModel);
@@ -120,8 +130,11 @@ export class ConnectionsStore {
       : next.ollamaPromptInstruction.trim();
     const generationPrefixOptions = next.generationPrefixOptions === undefined ? current.generationPrefixOptions : next.generationPrefixOptions;
     const generationPrefixSelection = normalizeSetting(next.generationPrefixSelection, current.generationPrefixSelection);
-    const runningHubImageNodeId = normalizeSetting(next.runningHubImageNodeId, current.runningHubImageNodeId);
-    const runningHubImageFieldName = normalizeSetting(next.runningHubImageFieldName, current.runningHubImageFieldName);
+    const runningHubImageNodeId = hasRunningHubBindingsUpdate ? undefined : normalizeSetting(next.runningHubImageNodeId, current.runningHubImageNodeId);
+    const runningHubImageFieldName = hasRunningHubBindingsUpdate ? undefined : normalizeSetting(next.runningHubImageFieldName, current.runningHubImageFieldName);
+    const runningHubBindings = next.runningHubBindings === undefined
+      ? normalizeRunningHubBindings(current.runningHubBindings)
+      : normalizeRunningHubBindings(next.runningHubBindings);
 
     const data: PrivateConnections = {
       ...(apifyApiToken ? { apifyApiToken } : {}),
@@ -138,6 +151,7 @@ export class ConnectionsStore {
       ...(runningHubPromptFieldName ? { runningHubPromptFieldName } : {}),
       ...(runningHubImageNodeId ? { runningHubImageNodeId } : {}),
       ...(runningHubImageFieldName ? { runningHubImageFieldName } : {}),
+      ...(runningHubBindings.length > 0 ? { runningHubBindings } : {}),
     };
 
     await this.write(data);

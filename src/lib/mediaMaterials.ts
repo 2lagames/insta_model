@@ -35,13 +35,15 @@ export function createMediaMaterials(item: ImportItem): MediaMaterial[] {
         id: `${item.id}:${asset.id}:video`,
         importItem: item,
         mediaType: "video",
-        label: "Video",
+        label: "Reel",
         files: {
+          image: asset.files.firstFrame,
           video: asset.files.video,
           firstFrame: asset.files.firstFrame,
           thumbnail: asset.files.thumbnail ?? asset.files.firstFrame
         }
       });
+      continue;
     }
 
     if (asset.files.firstFrame) {

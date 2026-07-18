@@ -34,6 +34,7 @@ import {
 } from "./lib/promptDocuments";
 import type { PromptMediaInput } from "./lib/promptTypes";
 import { createStatusLogText } from "./lib/statusLog";
+import { studioIds, type RunningHubBinding } from "./lib/studioBindings";
 
 type ActiveTab = "studio" | "connections";
 type StatusTone = "idle" | "running" | "error" | "ready";
@@ -54,6 +55,8 @@ const emptyCurrentSession: CurrentMediaSession = {
   sceneBibles: [],
   mediaSceneMap: {}
 };
+
+const emptyRunningHubBinding: RunningHubBinding = { nodeId: "", fieldName: "", studioId: "1" };
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("studio");
@@ -89,10 +92,7 @@ export default function App() {
   const [editingKey, setEditingKey] = useState<ConnectionKeyName | null>(null);
   const [isSavingKey, setIsSavingKey] = useState(false);
   const [runningHubWorkflowId, setRunningHubWorkflowId] = useState("");
-  const [runningHubPromptNodeId, setRunningHubPromptNodeId] = useState("");
-  const [runningHubPromptFieldName, setRunningHubPromptFieldName] = useState("text");
-  const [runningHubImageNodeId, setRunningHubImageNodeId] = useState("");
-  const [runningHubImageFieldName, setRunningHubImageFieldName] = useState("image");
+  const [runningHubBindings, setRunningHubBindings] = useState<RunningHubBinding[]>([emptyRunningHubBinding]);
   const [ollamaProvider, setOllamaProvider] = useState<"cloud" | "local">("local");
   const [ollamaCloudModel, setOllamaCloudModel] = useState("");
   const [ollamaLocalModel, setOllamaLocalModel] = useState("");
@@ -137,6 +137,14 @@ export default function App() {
   const selectedMedia = useMemo(
     () => mediaMaterials.find((material) => material.id === selectedMediaId) ?? mediaMaterials[0],
     [mediaMaterials, selectedMediaId]
+  );
+  const sourceMaterials = useMemo(
+    () => mediaMaterials.filter((material) => material.importItem.provider !== "runninghub"),
+    [mediaMaterials]
+  );
+  const generatedMaterials = useMemo(
+    () => mediaMaterials.filter((material) => material.importItem.provider === "runninghub"),
+    [mediaMaterials]
   );
 
   function appendActivityEntry(entry: Omit<ActivityLogEntry, "id" | "createdAt"> & { id?: string; createdAt?: string }) {
@@ -220,10 +228,7 @@ export default function App() {
       .then((loadedConnections) => {
         setConnections(loadedConnections);
         setRunningHubWorkflowId(loadedConnections.runningHubWorkflowId ?? "");
-        setRunningHubPromptNodeId(loadedConnections.runningHubPromptNodeId ?? "");
-        setRunningHubPromptFieldName(loadedConnections.runningHubPromptFieldName ?? "");
-        setRunningHubImageNodeId(loadedConnections.runningHubImageNodeId ?? "");
-        setRunningHubImageFieldName(loadedConnections.runningHubImageFieldName ?? "");
+        setRunningHubBindings(loadedConnections.runningHubBindings?.length ? loadedConnections.runningHubBindings : [emptyRunningHubBinding]);
         setOllamaProvider(loadedConnections.ollamaProvider ?? "local");
         setOllamaCloudModel(loadedConnections.ollamaCloudModel ?? "");
         setOllamaLocalModel(loadedConnections.ollamaLocalModel ?? "");
@@ -620,23 +625,29 @@ export default function App() {
         ollamaLocalModel,
         ollamaPromptInstruction,
         runningHubWorkflowId,
-        runningHubPromptNodeId,
-        runningHubPromptFieldName,
-        runningHubImageNodeId,
-        runningHubImageFieldName
+        runningHubBindings
       });
       setConnections(saved);
       setRunningHubWorkflowId(saved.runningHubWorkflowId ?? "");
-      setRunningHubPromptNodeId(saved.runningHubPromptNodeId ?? "");
-      setRunningHubPromptFieldName(saved.runningHubPromptFieldName ?? "");
-      setRunningHubImageNodeId(saved.runningHubImageNodeId ?? "");
-      setRunningHubImageFieldName(saved.runningHubImageFieldName ?? "");
+      setRunningHubBindings(saved.runningHubBindings?.length ? saved.runningHubBindings : [emptyRunningHubBinding]);
       recordStatus({ tone: "ready", message: "Connections saved locally." });
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
     } finally {
       setIsSavingConnections(false);
     }
+  }
+
+  function updateRunningHubBinding(index: number, update: Partial<RunningHubBinding>) {
+    setRunningHubBindings((current) => current.map((binding, bindingIndex) => bindingIndex === index ? { ...binding, ...update } : binding));
+  }
+
+  function addRunningHubBinding() {
+    setRunningHubBindings((current) => [...current, emptyRunningHubBinding]);
+  }
+
+  function removeRunningHubBinding(index: number) {
+    setRunningHubBindings((current) => current.length === 1 ? [emptyRunningHubBinding] : current.filter((_, bindingIndex) => bindingIndex !== index));
   }
 
   function handleEditKey(keyName: ConnectionKeyName) {
@@ -806,6 +817,8 @@ export default function App() {
                 onToggleMaterial={(materialId) => setSelectedForGeneration((current) => toggleMediaSelection(current, materialId))}
                 promptDocuments={promptDocuments}
                 selectedForGeneration={selectedForGeneration}
+                sourceMaterials={sourceMaterials}
+                generatedMaterials={generatedMaterials}
                 materials={mediaMaterials}
                 selected={selectedMedia}
                 selectedForGenerationCount={selectedForGeneration.length}
@@ -887,32 +900,18 @@ export default function App() {
                   value={runningHubWorkflowId}
                 />
               </label>
-              <label>
-                <span>Prompt node ID</span>
-                <input
-                  className="secret-input"
-                  onChange={(event) => setRunningHubPromptNodeId(event.target.value)}
-                  placeholder="6"
-                  value={runningHubPromptNodeId}
-                />
-              </label>
-              <label>
-                <span>Prompt field</span>
-                <input
-                  className="secret-input"
-                  onChange={(event) => setRunningHubPromptFieldName(event.target.value)}
-                  placeholder="text"
-                  value={runningHubPromptFieldName}
-                />
-              </label>
-              <label>
-                <span>Image node ID</span>
-                <input className="secret-input" onChange={(event) => setRunningHubImageNodeId(event.target.value)} placeholder="39" value={runningHubImageNodeId} />
-              </label>
-              <label>
-                <span>Image field</span>
-                <input className="secret-input" onChange={(event) => setRunningHubImageFieldName(event.target.value)} placeholder="image" value={runningHubImageFieldName} />
-              </label>
+            </div>
+            <div className="runninghub-bindings" aria-label="Подстановки RunningHub">
+              <div className="runninghub-bindings-title">Workflow bindings</div>
+              {runningHubBindings.map((binding, index) => (
+                <div className="runninghub-binding-row" key={`${index}-${binding.studioId}`}>
+                  <label><span>Node ID</span><input className="secret-input" onChange={(event) => updateRunningHubBinding(index, { nodeId: event.target.value })} placeholder="39" value={binding.nodeId} /></label>
+                  <label><span>Field</span><input className="secret-input" onChange={(event) => updateRunningHubBinding(index, { fieldName: event.target.value })} placeholder="image" value={binding.fieldName} /></label>
+                  <label><span>Studio ID</span><select onChange={(event) => updateRunningHubBinding(index, { studioId: event.target.value as RunningHubBinding["studioId"] })} value={binding.studioId}>{studioIds.map((studioId) => <option key={studioId} value={studioId}>{getStudioIdLabel(studioId)}</option>)}</select></label>
+                  <button aria-label="Добавить подстановку workflow" className="binding-icon-button" onClick={addRunningHubBinding} type="button">+</button>
+                  <button aria-label="Удалить подстановку workflow" className="binding-icon-button" onClick={() => removeRunningHubBinding(index)} type="button">−</button>
+                </div>
+              ))}
             </div>
           </div>
           <button
@@ -953,6 +952,8 @@ function Preview({
   selectedForGeneration,
   selectedForGenerationCount,
   selected,
+  sourceMaterials,
+  generatedMaterials,
   materials,
   setSelectedForGeneration,
   setPromptDocuments
@@ -976,11 +977,12 @@ function Preview({
   selectedForGeneration: string[];
   selectedForGenerationCount: number;
   selected?: MediaMaterial;
+  sourceMaterials: MediaMaterial[];
+  generatedMaterials: MediaMaterial[];
   materials: MediaMaterial[];
   setSelectedForGeneration: React.Dispatch<React.SetStateAction<string[]>>;
   setPromptDocuments: React.Dispatch<React.SetStateAction<PromptDocument[]>>;
 }) {
-  const importItem = selected?.importItem;
   const imageSource = selected?.files.image ?? selected?.files.firstFrame ?? selected?.files.thumbnail;
 
   return (
@@ -990,8 +992,8 @@ function Preview({
         <div className="media-stage">
           {selected?.files.video ? (
             <video controls poster={selected.files.firstFrame ?? selected.files.thumbnail} src={selected.files.video} />
-          ) : imageSource && importItem ? (
-            <img alt={importItem.title ?? "Imported Instagram media"} src={imageSource} />
+          ) : imageSource && selected ? (
+            <img alt={selected.importItem.title ?? "Imported Instagram media"} src={imageSource} />
           ) : selected ? (
             <div className="preview-empty">No preview file was generated for this import.</div>
           ) : null}
@@ -999,38 +1001,12 @@ function Preview({
         </div>
         <div className="media-column">
           <div className="panel-label">Media</div>
-          <MediaSelector materials={materials} onSelect={onSelectMaterial} onSelectAll={() => setSelectedForGeneration((current) => toggleAllMediaSelection(current, materials.map((material) => material.id)))} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
+          <MediaSelector materials={sourceMaterials} onSelect={onSelectMaterial} onSelectAll={() => setSelectedForGeneration((current) => toggleAllMediaSelection(current, sourceMaterials.map((material) => material.id)))} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
         </div>
-        <aside className="preview-details"><div className="panel-label">Info</div>
-          <div className="info-content">
-            <section className="caption-panel">
-              <div className="panel-label">Text</div>
-              <div className="caption-text">{importItem?.caption ?? ""}</div>
-            </section>
-            <dl className="metadata-grid">
-              <div>
-                <dt>Source kind</dt>
-                <dd>{importItem?.sourceKind ?? ""}</dd>
-              </div>
-              <div>
-                <dt>Type</dt>
-                <dd>{selected?.mediaType ?? ""}</dd>
-              </div>
-              <div>
-                <dt>Status</dt>
-                <dd>{importItem?.status ?? ""}</dd>
-              </div>
-              <div>
-                <dt>Imported</dt>
-                <dd>{importItem ? new Date(importItem.createdAt).toLocaleString() : ""}</dd>
-              </div>
-              <div>
-                <dt>Source</dt>
-                <dd>{importItem ? (importItem.sourceUrl.startsWith("local://") ? "Локальное изображение — ссылка Instagram отсутствует" : <a href={importItem.sourceUrl} rel="noreferrer" target="_blank">Open Instagram link</a>) : ""}</dd>
-              </div>
-            </dl>
-          </div>
-        </aside>
+        <div className="media-column generated-media-column">
+          <div className="panel-label">Generated Media</div>
+          <MediaSelector materials={generatedMaterials} onSelect={onSelectMaterial} onSelectAll={() => setSelectedForGeneration((current) => toggleAllMediaSelection(current, generatedMaterials.map((material) => material.id)))} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
+        </div>
         <GenerationWorkspace
           generationPrefixOptions={generationPrefixOptions}
           generationPrefixSelection={generationPrefixSelection}
@@ -1155,6 +1131,7 @@ function MediaSelector({
             <button className="gallery-preview" onClick={() => onSelect(material)} type="button">
               <GalleryThumb material={material} />
               <span>{material.label}</span>
+              <span className="studio-id">Studio ID {getMaterialStudioId(material)}</span>
             </button>
             <label className="gallery-select">
               <input checked={selectedForGeneration.includes(material.id)} onChange={() => onToggle(material.id)} type="checkbox" />
@@ -1198,7 +1175,7 @@ function PromptEditors({
       {documents.map((document) => (
         <article className="prompt-editor-card" key={document.mediaId}>
           <div className="prompt-editor-header">
-            <strong>Промт: {materialById.get(document.mediaId)?.label ?? document.label}</strong>
+            <strong>Промт · Studio ID 2: {materialById.get(document.mediaId)?.label ?? document.label}</strong>
             <div className="prompt-editor-actions">
               <button aria-label="Отменить изменение промта" disabled={isBusy || document.historyIndex === 0} onClick={() => onUndo(document.mediaId)} type="button">↶</button>
                <button aria-label="Повторить изменение промта" disabled={isBusy || document.historyIndex === document.history.length - 1} onClick={() => onRedo(document.mediaId)} type="button">↷</button>
@@ -1286,6 +1263,18 @@ function getIntegrationName(keyName: ConnectionKeyName): string {
   return "RunningHub";
 }
 
+function getStudioIdLabel(studioId: RunningHubBinding["studioId"]): string {
+  if (studioId === "1") return "1 · Source image";
+  if (studioId === "2") return "2 · Prompt";
+  if (studioId === "3") return "3 · Source video";
+  return "4 · Generated image";
+}
+
+function getMaterialStudioId(material: MediaMaterial): string {
+  if (material.importItem.provider === "runninghub") return "4";
+  return material.mediaType === "video" ? "1, 3" : "1";
+}
+
 function LogPanel({
   copyState,
   entries,
@@ -1356,6 +1345,8 @@ function createPromptMediaInput(material: MediaMaterial, currentSession: Current
     id: material.id,
     label: material.label,
     imagePath,
+    ...(material.files.video ? { videoPath: material.files.video } : {}),
+    ...(material.importItem.provider === "runninghub" ? { generatedImagePath: imagePath } : {}),
     sourceKind: material.importItem.mediaType === "video" || material.label === "First frame"
       ? "video-first-frame"
       : "photo",
