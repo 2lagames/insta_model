@@ -327,6 +327,7 @@ app.post("/api/generation/images", async (request, response) => {
   let generation: GenerationOperation | undefined;
   try {
     const jobs = parseRunningHubPromptJobs(request.body?.jobs);
+    const batch = parseRunningHubGenerationBatch(request.body?.batchPosition, request.body?.batchTotal, jobs.length);
     const activeGeneration = generationController.start();
     generation = activeGeneration;
     const connections = await connectionsStore.readPrivate();
@@ -334,7 +335,7 @@ app.post("/api/generation/images", async (request, response) => {
     activityLog.publish({
       tone: "running",
       source: "generation",
-      message: `RunningHub image generation started for ${jobs.length} media item(s).`
+      message: `RunningHub image generation started for ${batch.batchPosition}/${batch.batchTotal}.`
     });
 
     const runningHubResult = await runRunningHubImageGeneration({
@@ -361,7 +362,9 @@ app.post("/api/generation/images", async (request, response) => {
       onTaskCreated: (taskId) => activeGeneration.registerRunningHubTask({
         apiKey: connections.runningHubApiKey ?? "",
         taskId
-      })
+      }),
+      batchPosition: batch.batchPosition,
+      batchTotal: batch.batchTotal
     });
     generation.throwIfCancelled();
     await store.saveItem(runningHubResult.item);
@@ -557,4 +560,19 @@ function parseRunningHubPromptJobs(value: unknown): Array<{ media: PromptMediaIn
     const [media] = parsePromptMedia([record.media]);
     return { media, prompt };
   });
+}
+
+function parseRunningHubGenerationBatch(batchPositionValue: unknown, batchTotalValue: unknown, jobsLength: number): { batchPosition: number; batchTotal: number } {
+  if (batchPositionValue === undefined && batchTotalValue === undefined) {
+    return { batchPosition: 1, batchTotal: jobsLength };
+  }
+  if (!Number.isInteger(batchPositionValue) || !Number.isInteger(batchTotalValue)) {
+    throw new Error("Image generation progress must include integer batchPosition and batchTotal values.");
+  }
+  const batchPosition = batchPositionValue as number;
+  const batchTotal = batchTotalValue as number;
+  if (batchPosition < 1 || batchTotal < batchPosition || batchPosition + jobsLength - 1 > batchTotal) {
+    throw new Error("Image generation progress is outside the requested batch.");
+  }
+  return { batchPosition, batchTotal };
 }

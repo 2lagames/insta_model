@@ -43,7 +43,8 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("Локальная Ollama");
     expect(appSource).toContain("Workflow bindings");
     expect(appSource).toContain('aria-label="Отменить изменение промта"');
-    expect(appSource).toContain("generateImagesWithOptions([imageJob], { signal: abortController.signal })");
+    expect(appSource).toContain("batchPosition: batchIndex + 1");
+    expect(appSource).toContain("batchTotal: imageJobs.length");
     expect(appSource).not.toContain("workflow-file-control");
     expect(cssSource).toContain("aspect-ratio: 9 / 16");
     expect(cssSource).toContain(".gallery-select");
@@ -218,8 +219,10 @@ describe("studio preview layout", () => {
     const generationStart = appSource.indexOf("async function handleGenerateImages()");
     const generationHandler = appSource.slice(generationStart, appSource.indexOf("function handleCancelGeneration", generationStart));
 
-    expect(generationHandler).toContain("for (const imageJob of imageJobs)");
-    expect(generationHandler).toContain("await generateImagesWithOptions([imageJob], { signal: abortController.signal })");
+    expect(generationHandler).toContain("for (const [batchIndex, imageJob] of imageJobs.entries())");
+    expect(generationHandler).toContain("await generateImagesWithOptions([imageJob], {");
+    expect(generationHandler).toContain("batchPosition: batchIndex + 1");
+    expect(generationHandler).toContain("batchTotal: imageJobs.length");
     expect(generationHandler).toContain("setItems((current) => [generated.item");
     expect(generationHandler).toContain("setCurrentSession(generated.session)");
     expect(generationHandler).toContain("setSessionMediaItemIds(generated.session.itemIds)");

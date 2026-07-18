@@ -569,8 +569,12 @@ export default function App() {
         return prompt === undefined ? [] : [{ media, prompt }];
       });
       const imageJobs = repeatImageGenerationJobs(promptImageJobs, imageGenerationsPerMedia);
-      for (const imageJob of imageJobs) {
-        const generated = await generateImagesWithOptions([imageJob], { signal: abortController.signal });
+      for (const [batchIndex, imageJob] of imageJobs.entries()) {
+        const generated = await generateImagesWithOptions([imageJob], {
+          signal: abortController.signal,
+          batchPosition: batchIndex + 1,
+          batchTotal: imageJobs.length
+        });
         setItems((current) => [generated.item, ...current.filter((item) => item.id !== generated.item.id)]);
         const generatedMedia = createMediaMaterials(generated.item);
         setCurrentSession(generated.session);

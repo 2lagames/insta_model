@@ -58,6 +58,8 @@ type RunningHubGenerationOptions = {
   onStatus?: StatusCallback;
   signal?: AbortSignal;
   onTaskCreated?: (taskId: string) => void;
+  batchPosition?: number;
+  batchTotal?: number;
 };
 
 export function buildRunningHubCreatePayload(input: {
@@ -96,6 +98,12 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
     throw new Error("RunningHub generation requires at least one prompt job.");
   }
 
+  const batchPosition = options.batchPosition ?? 1;
+  const batchTotal = options.batchTotal ?? options.jobs.length;
+  if (!Number.isInteger(batchPosition) || !Number.isInteger(batchTotal) || batchPosition < 1 || batchTotal < batchPosition || batchPosition + options.jobs.length - 1 > batchTotal) {
+    throw new Error("RunningHub generation progress is invalid.");
+  }
+
   const fetchImpl = options.fetchImpl ?? fetch;
   const baseUrl = options.baseUrl ?? defaultRunningHubBaseUrl;
   const now = options.now ?? new Date();
@@ -108,7 +116,7 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
 
   for (const [jobIndex, job] of options.jobs.entries()) {
     throwIfAborted(options.signal);
-    const passLabel = `${job.label} (${jobIndex + 1}/${options.jobs.length})`;
+    const passLabel = `${job.label} (${batchPosition + jobIndex}/${batchTotal})`;
     options.onStatus?.({
       tone: "running",
       source: "runninghub",

@@ -279,13 +279,17 @@ export async function generateImages(jobs: ImageGenerationJobInput[]): Promise<I
   return await generateImagesWithOptions(jobs);
 }
 
-export async function generateImagesWithOptions(jobs: ImageGenerationJobInput[], options: { signal?: AbortSignal } = {}): Promise<ImageGenerationResult> {
+export async function generateImagesWithOptions(jobs: ImageGenerationJobInput[], options: { signal?: AbortSignal; batchPosition?: number; batchTotal?: number } = {}): Promise<ImageGenerationResult> {
   const response = await apiFetch("/api/generation/images", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ jobs }),
+    body: JSON.stringify({
+      jobs,
+      ...(options.batchPosition !== undefined ? { batchPosition: options.batchPosition } : {}),
+      ...(options.batchTotal !== undefined ? { batchTotal: options.batchTotal } : {})
+    }),
     ...(options.signal ? { signal: options.signal } : {})
   });
   await assertOk(response);

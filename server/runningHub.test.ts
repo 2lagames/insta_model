@@ -178,6 +178,7 @@ describe("runRunningHubImageGeneration", () => {
     const outputDir = join(tempDir, "output");
     const imagePath = join(tempDir, "source.png");
     const requests: Array<{ pathname: string; init?: RequestInit }> = [];
+    const statusMessages: string[] = [];
 
     await writeFile(imagePath, "source-image");
     const fetchImpl = (async (url: URL | RequestInfo, init?: RequestInit) => {
@@ -209,6 +210,8 @@ describe("runRunningHubImageGeneration", () => {
         now: new Date("2026-06-25T10:30:00.000Z"),
         baseUrl: "https://runninghub.example.com",
         fetchImpl,
+        batchPosition: 2,
+        batchTotal: 2,
         config: {
           apiKey: "rh_api_key",
           workflowId: "workflow",
@@ -217,7 +220,8 @@ describe("runRunningHubImageGeneration", () => {
           imageNodeId: "39",
           imageFieldName: "image"
         },
-        jobs: [{ mediaId: "media-1", label: "Source image", imagePath, prompt: "new prompt" }]
+        jobs: [{ mediaId: "media-1", label: "Source image", imagePath, prompt: "new prompt" }],
+        onStatus: (event) => statusMessages.push(event.message)
       });
 
       expect(requests.map((request) => request.pathname)).toEqual([
@@ -236,6 +240,7 @@ describe("runRunningHubImageGeneration", () => {
           { nodeId: "52", fieldName: "prompt", fieldValue: "new prompt" }
         ]
       });
+      expect(statusMessages).toContain("Uploading source image for Source image (2/2).");
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

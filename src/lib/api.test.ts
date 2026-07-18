@@ -5,6 +5,7 @@ import {
   cleanupDuplicateImports,
   generateImagePrompts,
   generateImages,
+  generateImagesWithOptions,
   importInstagramUrl,
   listOllamaModels,
   listImports,
@@ -116,6 +117,19 @@ describe("generateImages", () => {
       sourceKind: "photo"
       }
     }])).rejects.toThrow("Local API is not reachable");
+  });
+
+  it("includes the overall sequential generation position in the request", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      item: { id: "generated-2", sourceUrl: "runninghub://task-2", mediaType: "image", status: "ready", createdAt: "2026-07-19", files: {}, assets: [] }
+    })));
+    const media = { id: "item:asset:image", label: "Image", imagePath: "/input/image.jpg", sourceKind: "photo" as const };
+
+    await generateImagesWithOptions([{ media, prompt: "prompt" }], { batchPosition: 2, batchTotal: 2 });
+
+    expect(fetchSpy).toHaveBeenCalledWith("/api/generation/images", expect.objectContaining({
+      body: JSON.stringify({ jobs: [{ media, prompt: "prompt" }], batchPosition: 2, batchTotal: 2 })
+    }));
   });
 });
 
