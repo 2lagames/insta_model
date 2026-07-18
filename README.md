@@ -1,6 +1,6 @@
 # Instagram Import Studio
 
-Local web studio for turning Instagram photo posts, carousels, and local image files into reusable source material for a content-production workflow. It downloads only photos through Apify's official Instagram Scraper actor; generates editable image prompts with Ollama Cloud or a local Ollama instance; and sends the selected source image and final prompt to a RunningHub ComfyUI workflow running Krea 2.
+Local web studio for turning Instagram photo posts, carousels, Reels, and local image files into reusable source material for a content-production workflow. It downloads photos and Reel videos through Apify's official Instagram Scraper actor; generates editable image prompts with Ollama Cloud or a local Ollama instance; and sends the selected source image and final prompt to a RunningHub ComfyUI workflow running Krea 2.
 
 It is designed for creators who need to revisit the same reference post without repeatedly downloading the same assets. Normal imports reuse healthy local media; use **Обновить заново** only when a fresh download is needed.
 
@@ -59,7 +59,7 @@ You can also update from a terminal:
 
 Open the `Подключения` tab and save API settings there:
 
-- Apify API token for Instagram photo imports.
+- Apify API token for Instagram photo and Reel imports.
 - Ollama Cloud API key, Cloud/Local mode, model selection, and shared instruction for prompt generation.
 - RunningHub API key and workflow ID for Krea 2 generation.
 - Prompt node ID and prompt field name for replacing the workflow prompt.
@@ -79,9 +79,9 @@ Local persistence does not prevent the configured integrations from receiving da
 
 ## Import Flow
 
-1. Paste an Instagram photo post or carousel URL in `Студия` and press `Import`, or use **Загрузить изображение** to select a local image.
-2. The local API runs `apify/instagram-scraper` through Apify with the URL as the only input and a result limit of `1`.
-3. The application saves only photos and carousel items. Captions, comments, profile data, video files, and reel covers are discarded; Reels are reported as unsupported.
+1. Paste an Instagram photo post, carousel, or Reel URL in `Студия` and press `Import`, or use **Загрузить изображение** to select a local image.
+2. The local API runs `apify/instagram-scraper` through Apify with the URL as the only input and a result limit of `1`; it uses the actor's Reel mode for Reel URLs.
+3. The application saves photos, carousel items, and Reel MP4 files. For a Reel it also generates a local first-frame preview. Captions, comments, profile data, and other raw Apify response fields are discarded.
 4. Downloaded or uploaded source media is stored under `input/`.
 
 **Сброс** clears the current media session, preview, metadata, and prompt text, but keeps the Studio layout and persistent Generation workspace options. It does not delete files from `input/` or `output/`.

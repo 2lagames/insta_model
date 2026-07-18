@@ -59,12 +59,20 @@ describe("createImportItemFromApifyPosts", () => {
     ]);
   });
 
-  it("rejects a reel response rather than downloading its video or cover", () => {
-    expect(() => createImportItemFromApifyPosts("https://www.instagram.com/reel/example/", [{
+  it("extracts a reel video URL without keeping its caption or cover URL", () => {
+    const item = createImportItemFromApifyPosts("https://www.instagram.com/reel/example/", [{
       type: "Video",
+      shortCode: "reel-example",
+      caption: "This must never be persisted",
       displayUrl: "https://cdn.example.com/reel-cover.jpg",
       videoUrl: "https://cdn.example.com/reel.mp4"
-    }], "2026-07-18T10:00:00.000Z", "import-123")).toThrow("did not include downloadable photos");
+    }], "2026-07-18T10:00:00.000Z", "import-123");
+
+    expect(item.mediaType).toBe("video");
+    expect(item.caption).toBeUndefined();
+    expect(item.assets).toEqual([
+      { id: "reel-example-video-001", mediaType: "video", files: { video: "https://cdn.example.com/reel.mp4" } }
+    ]);
   });
 });
 
@@ -96,24 +104,79 @@ describe("materializeImportAssets", () => {
       await rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("downloads reel videos and creates a local first-frame preview", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "input-video-"));
+    const inputDir = join(tempDir, "input");
+
+    try {
+      const assets = await materializeImportAssets([{
+        id: "reel-video",
+        mediaType: "video",
+        files: { video: "https://cdn.example.com/reel.mp4" }
+      }], {
+        inputDir,
+        importId: "import-123",
+        createdAt: "2026-07-18T10:00:00.000Z",
+        fetchImpl: (async () => new Response(Buffer.from("video-bytes"), { status: 200 })) as typeof fetch,
+        generateFirstFrame: async (_videoPath, firstFramePath) => {
+          await writeFile(firstFramePath, "frame-bytes");
+        }
+      });
+
+      expect(assets[0]?.files).toEqual({
+        video: "/input/20260718/import-123/video-001.mp4",
+        firstFrame: "/input/20260718/import-123/first-frame-001.jpg",
+        thumbnail: "/input/20260718/import-123/first-frame-001.jpg"
+      });
+      await expect(readFile(join(inputDir, "20260718", "import-123", "video-001.mp4"), "utf8")).resolves.toBe("video-bytes");
+      await expect(readFile(join(inputDir, "20260718", "import-123", "first-frame-001.jpg"), "utf8")).resolves.toBe("frame-bytes");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("importInstagramUrl", () => {
-  it("rejects a reel before starting a billable Apify run", async () => {
-    let requestCount = 0;
-    const fetchImpl = (async () => {
-      requestCount += 1;
-      return new Response("[]", { status: 200 });
+  it("calls the actor in reels mode and materializes the video", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "apify-reel-"));
+    const requested: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl = (async (url: URL | string, init?: RequestInit) => {
+      requested.push({ url: String(url), init });
+      if (String(url).startsWith("https://api.apify.com/")) {
+        return new Response(JSON.stringify([{
+          type: "Video",
+          shortCode: "reel-example",
+          videoUrl: "https://cdn.example.com/reel.mp4",
+          caption: "discarded"
+        }]), { status: 200 });
+      }
+      return new Response(Buffer.from("video-bytes"), { status: 200 });
     }) as typeof fetch;
 
-    await expect(importInstagramUrl("https://www.instagram.com/reel/example/", {
-      dataDir: "/tmp/data",
-      inputDir: "/tmp/input",
-      apifyApiToken: "apify_token_123",
-      fetchImpl
-    })).rejects.toThrow("Only photo posts and photo carousels are supported");
+    try {
+      const item = await importInstagramUrl("https://www.instagram.com/reel/example/", {
+        dataDir: join(tempDir, "data"),
+        inputDir: join(tempDir, "input"),
+        apifyApiToken: "apify_token_123",
+        fetchImpl,
+        generateFirstFrame: async (_videoPath, firstFramePath) => {
+          await writeFile(firstFramePath, "frame-bytes");
+        }
+      });
 
-    expect(requestCount).toBe(0);
+      expect(JSON.parse(String(requested[0]?.init?.body))).toEqual({
+        directUrls: ["https://www.instagram.com/reel/example/"],
+        resultsType: "reels",
+        resultsLimit: 1
+      });
+      expect(item.mediaType).toBe("video");
+      expect(item.assets[0]?.files.video).toMatch(/^\/input\//);
+      expect(item.assets[0]?.files.firstFrame).toMatch(/^\/input\//);
+      expect(item.caption).toBeUndefined();
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("calls the official actor for one post and materializes only its photos", async () => {
@@ -153,8 +216,14 @@ describe("importInstagramUrl", () => {
       });
       expect(item.assets).toHaveLength(2);
       expect(item.caption).toBeUndefined();
-      await expect(readFile(join(dataDir, "imports", item.id, "apify-photos.json"), "utf8"))
-        .resolves.toBe(JSON.stringify({ sourceUrl: postUrl, photoUrls: item.assets.map((asset) => asset.files.image) }, null, 2));
+      await expect(readFile(join(dataDir, "imports", item.id, "apify-media.json"), "utf8"))
+        .resolves.toBe(JSON.stringify({
+          sourceUrl: postUrl,
+          assets: item.assets.map(({ files, ...asset }) => {
+            const { metadata: _metadata, ...mediaFiles } = files;
+            return { ...asset, files: mediaFiles };
+          })
+        }, null, 2));
       await expect(readdir(join(dataDir, "imports", item.id))).resolves.not.toContain("apify-response.json");
       await expect(readFile(join(dataDir, "imports", item.id, "source.json"), "utf8"))
         .resolves.toContain("\"provider\": \"apify\"");

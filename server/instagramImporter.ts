@@ -1,5 +1,7 @@
+import { spawn } from "node:child_process";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
+import ffmpegPath from "ffmpeg-static";
 import type { ImportAsset, ImportFiles, ImportItem, MediaKind } from "../src/lib/importTypes";
 import { canonicalizeInstagramUrl, getInstagramSourceKind } from "../src/lib/instagramUrl";
 
@@ -15,6 +17,7 @@ export type ImportInstagramOptions = {
   publicBasePath?: string;
   apifyApiToken: string;
   fetchImpl?: FetchLike;
+  generateFirstFrame?: (videoPath: string, firstFramePath: string) => Promise<void>;
 };
 
 export type MaterializeImportAssetsOptions = {
@@ -25,6 +28,7 @@ export type MaterializeImportAssetsOptions = {
   publicOutputDir?: string;
   publicBasePath?: string;
   fetchImpl?: FetchLike;
+  generateFirstFrame?: (videoPath: string, firstFramePath: string) => Promise<void>;
 };
 
 export function buildApifyInstagramScraperUrl(): URL {
@@ -36,9 +40,6 @@ export async function importInstagramUrl(
   options: ImportInstagramOptions
 ): Promise<ImportItem> {
   const canonicalSourceUrl = canonicalizeInstagramUrl(sourceUrl);
-  if (getInstagramSourceKind(canonicalSourceUrl) === "reel") {
-    throw new Error("Only photo posts and photo carousels are supported. Reels are not sent to Apify.");
-  }
   const apiToken = options.apifyApiToken.trim();
   if (!apiToken) {
     throw new Error("Apify API token is missing. Open Настройки and save the token first.");
@@ -64,13 +65,14 @@ export async function importInstagramUrl(
       createdAt,
       outputDir: stagingInputDir,
       publicOutputDir: inputOutputDir,
-      fetchImpl: options.fetchImpl
+      fetchImpl: options.fetchImpl,
+      generateFirstFrame: options.generateFirstFrame
     });
 
     await mkdir(stagingImportDir, { recursive: true });
     await writeFile(
-      join(stagingImportDir, "apify-photos.json"),
-      JSON.stringify({ sourceUrl: canonicalSourceUrl, photoUrls: item.assets.map((asset) => asset.files.image) }, null, 2),
+      join(stagingImportDir, "apify-media.json"),
+      JSON.stringify({ sourceUrl: canonicalSourceUrl, assets: item.assets }, null, 2),
       "utf8"
     );
     await writeFile(
@@ -87,7 +89,7 @@ export async function importInstagramUrl(
     publishedImport = true;
 
     const metadataPath = toPublicPath(
-      join(importDir, "apify-photos.json"),
+      join(importDir, "apify-media.json"),
       options.dataDir,
       options.publicBasePath ?? "/media"
     );
@@ -124,18 +126,21 @@ export function createImportItemFromApifyPosts(
     throw new Error("Apify did not return a public Instagram post for this link.");
   }
 
-  const imageUrls = collectPhotoUrls(post);
-  if (imageUrls.length === 0) {
-    throw new Error("Apify did not include downloadable photos for this link. Only photo posts and photo carousels are supported.");
+  const shortcode = getString(post, "shortCode") ?? "instagram-post";
+  const videoUrl = getString(post, "type")?.toLowerCase() === "video" ? selectVideoUrl(post) : undefined;
+  const imageUrls = videoUrl ? [] : collectPhotoUrls(post);
+  if (!videoUrl && imageUrls.length === 0) {
+    throw new Error("Apify did not include a downloadable photo or video for this link.");
   }
 
-  const shortcode = getString(post, "shortCode") ?? "instagram-post";
-  const assets: ImportAsset[] = imageUrls.map((imageUrl, index) => ({
-    id: `${shortcode}-image-${String(index + 1).padStart(3, "0")}`,
-    mediaType: "image",
-    files: { image: imageUrl, thumbnail: imageUrl }
-  }));
-  const mediaType: MediaKind = assets.length > 1 ? "carousel" : "image";
+  const assets: ImportAsset[] = videoUrl
+    ? [{ id: `${shortcode}-video-001`, mediaType: "video", files: { video: videoUrl } }]
+    : imageUrls.map((imageUrl, index) => ({
+      id: `${shortcode}-image-${String(index + 1).padStart(3, "0")}`,
+      mediaType: "image",
+      files: { image: imageUrl, thumbnail: imageUrl }
+    }));
+  const mediaType: MediaKind = videoUrl ? "video" : assets.length > 1 ? "carousel" : "image";
 
   return {
     id: importId,
@@ -162,20 +167,33 @@ export async function materializeImportAssets(
   await mkdir(outputDir, { recursive: true });
 
   return await Promise.all(assets.map(async (asset, index) => {
-    if (asset.mediaType !== "image" || !asset.files.image) {
-      throw new Error("Only image assets can be materialized from Apify Instagram imports.");
+    const ordinal = String(index + 1).padStart(3, "0");
+    if (asset.mediaType === "image" && asset.files.image) {
+      const imageFileName = `image-${ordinal}${inferExtension(asset.files.image, "image")}`;
+      await downloadToFile(asset.files.image, join(outputDir, imageFileName), fetchImpl);
+      const publicImagePath = toPublicPath(join(publicOutputDir, imageFileName), options.inputDir, publicBasePath);
+      const files: ImportFiles = { ...asset.files, image: publicImagePath, thumbnail: publicImagePath };
+      return { ...asset, files };
     }
 
-    const ordinal = String(index + 1).padStart(3, "0");
-    const imagePath = join(outputDir, `image-${ordinal}${inferExtension(asset.files.image)}`);
-    await downloadToFile(asset.files.image, imagePath, fetchImpl);
-    const publicImagePath = toPublicPath(
-      join(publicOutputDir, `image-${ordinal}${inferExtension(asset.files.image)}`),
-      options.inputDir,
-      publicBasePath
-    );
-    const files: ImportFiles = { ...asset.files, image: publicImagePath, thumbnail: publicImagePath };
-    return { ...asset, files };
+    if (asset.mediaType === "video" && asset.files.video) {
+      const videoFileName = `video-${ordinal}${inferExtension(asset.files.video, "video")}`;
+      const videoPath = join(outputDir, videoFileName);
+      await downloadToFile(asset.files.video, videoPath, fetchImpl);
+      const firstFrameFileName = `first-frame-${ordinal}.jpg`;
+      await (options.generateFirstFrame ?? generateFirstFrameWithFfmpeg)(videoPath, join(outputDir, firstFrameFileName));
+      const publicVideoPath = toPublicPath(join(publicOutputDir, videoFileName), options.inputDir, publicBasePath);
+      const publicFirstFramePath = toPublicPath(join(publicOutputDir, firstFrameFileName), options.inputDir, publicBasePath);
+      const files: ImportFiles = {
+        ...asset.files,
+        video: publicVideoPath,
+        firstFrame: publicFirstFramePath,
+        thumbnail: publicFirstFramePath
+      };
+      return { ...asset, files };
+    }
+
+    throw new Error("Apify returned an asset without a downloadable media URL.");
   }));
 }
 
@@ -192,7 +210,7 @@ async function fetchApifyInstagramPosts(
     },
     body: JSON.stringify({
       directUrls: [sourceUrl],
-      resultsType: "posts",
+      resultsType: getInstagramSourceKind(sourceUrl) === "reel" ? "reels" : "posts",
       resultsLimit: 1
     })
   });
@@ -248,6 +266,10 @@ function collectPhotoUrls(post: ApifyPost): string[] {
   return uniqueUrls([getString(post, "displayUrl")]);
 }
 
+function selectVideoUrl(post: ApifyPost): string | undefined {
+  return uniqueUrls([getString(post, "videoUrl"), getString(post, "video_url")])[0];
+}
+
 function getUrlArray(record: ApifyPost, key: string): string[] {
   const value = record[key];
   return Array.isArray(value)
@@ -291,7 +313,7 @@ async function downloadToFile(url: string, path: string, fetchImpl: FetchLike): 
   await writeFile(path, Buffer.from(await response.arrayBuffer()));
 }
 
-function inferExtension(url: string): string {
+function inferExtension(url: string, mediaType: "image" | "video"): string {
   try {
     const extension = extname(new URL(url).pathname).toLowerCase();
     if (extension && /^[.][a-z0-9]+$/.test(extension)) {
@@ -300,7 +322,35 @@ function inferExtension(url: string): string {
   } catch {
     // Fall through to the image default.
   }
-  return ".jpg";
+  return mediaType === "video" ? ".mp4" : ".jpg";
+}
+
+async function generateFirstFrameWithFfmpeg(videoPath: string, firstFramePath: string): Promise<void> {
+  if (!ffmpegPath) {
+    throw new Error("ffmpeg-static did not provide an ffmpeg binary for this platform.");
+  }
+
+  await runCommand(ffmpegPath, ["-y", "-ss", "00:00:00.1", "-i", videoPath, "-frames:v", "1", firstFramePath]);
+}
+
+async function runCommand(command: string, args: string[]): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: ["ignore", "ignore", "pipe"]
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${command} exited with code ${code}: ${stderr.trim()}`));
+    });
+  });
 }
 
 function formatDateFolder(value: string): string {

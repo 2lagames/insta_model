@@ -104,7 +104,7 @@ describe("image prompt activity", () => {
     const source = readFileSync("server/index.ts", "utf8");
 
     expect(source).not.toContain('app.use("/media", express.static(dataDir))');
-    expect(source).toContain('app.get("/media/imports/:importId/apify-photos.json"');
+    expect(source).toContain('app.get("/media/imports/:importId/apify-media.json"');
     expect(source).toContain("resolveImportMetadataPath");
   });
 
@@ -117,13 +117,13 @@ describe("image prompt activity", () => {
     expect(source).toContain('importProvider: "apify"');
   });
 
-  it("rejects reels before the local cache can reuse legacy video imports", () => {
+  it("allows reels through the import route for the Apify reel importer", () => {
     const source = readFileSync("server/index.ts", "utf8");
     const importRouteStart = source.indexOf('app.post("/api/imports"');
     const cacheLookup = source.indexOf("store.findNewestReusableBySourceUrl", importRouteStart);
     const importRoute = source.slice(importRouteStart, cacheLookup);
 
-    expect(importRoute).toContain('getInstagramSourceKind(validation.url) === "reel"');
+    expect(importRoute).not.toContain('getInstagramSourceKind(validation.url) === "reel"');
   });
 
   it("runs RunningHub only with submitted media and edited prompts", () => {

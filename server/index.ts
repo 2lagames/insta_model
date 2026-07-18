@@ -2,7 +2,7 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, extname, join, relative, resolve } from "node:path";
 import express from "express";
 import type { ImportAsset, ImportItem } from "../src/lib/importTypes";
-import { getInstagramSourceKind, validateInstagramUrl } from "../src/lib/instagramUrl";
+import { validateInstagramUrl } from "../src/lib/instagramUrl";
 import { ActivityLog } from "./activityLog";
 import { ConnectionsStore, type ConnectionKeyName } from "./connectionsStore";
 import { type PromptMediaInput } from "./ideogramPrompt";
@@ -29,7 +29,7 @@ app.use(express.json({ limit: "25mb" }));
 app.use("/input", express.static(inputDir));
 app.use("/output", express.static(outputDir));
 
-app.get("/media/imports/:importId/apify-photos.json", async (request, response) => {
+app.get("/media/imports/:importId/apify-media.json", async (request, response) => {
   const metadataPath = resolveImportMetadataPath(dataDir, request.params.importId);
   if (!metadataPath) {
     response.sendStatus(404);
@@ -176,11 +176,6 @@ app.post("/api/imports", async (request, response) => {
     response.status(400).json({ error: validation.message });
     return;
   }
-  if (getInstagramSourceKind(validation.url) === "reel") {
-    response.status(400).json({ error: "Only photo posts and photo carousels are supported. Reels are not imported." });
-    return;
-  }
-
   try {
     activityLog.publish({ tone: "running", source: "import", message: `Import started: ${validation.url}` });
     if (!forceRefresh) {
