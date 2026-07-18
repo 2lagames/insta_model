@@ -3,7 +3,7 @@ import { basename, extname, join, relative, resolve } from "node:path";
 import express from "express";
 import type { ImportAsset, ImportItem } from "../src/lib/importTypes";
 import { validateInstagramUrl } from "../src/lib/instagramUrl";
-import { assertUniqueRunningHubBindings, normalizeRunningHubBindings } from "../src/lib/studioBindings";
+import { normalizeRunningHubBindings, validateRunningHubBindings } from "../src/lib/studioBindings";
 import { ActivityLog } from "./activityLog";
 import { ConnectionsStore, type ConnectionKeyName } from "./connectionsStore";
 import { type PromptMediaInput } from "./ideogramPrompt";
@@ -448,9 +448,7 @@ function parseRunningHubBindings(value: unknown) {
   if (!Array.isArray(value)) {
     return undefined;
   }
-  const bindings = normalizeRunningHubBindings(value);
-  assertUniqueRunningHubBindings(bindings);
-  return bindings;
+  return validateRunningHubBindings(value);
 }
 
 function parseConnectionKeyName(value: unknown): ConnectionKeyName {

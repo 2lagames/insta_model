@@ -31,6 +31,27 @@ export function normalizeRunningHubBindings(value: unknown): RunningHubBinding[]
   });
 }
 
+export function validateRunningHubBindings(value: unknown): RunningHubBinding[] {
+  if (!Array.isArray(value)) {
+    throw new Error("Workflow bindings must be an array.");
+  }
+
+  const bindings = value.map((candidate) => {
+    if (!candidate || typeof candidate !== "object") {
+      throw new Error("Each workflow binding must include Node ID, Field, and Studio ID.");
+    }
+    const record = candidate as Record<string, unknown>;
+    const nodeId = typeof record.nodeId === "string" ? record.nodeId.trim() : "";
+    const fieldName = typeof record.fieldName === "string" ? record.fieldName.trim() : "";
+    if (!nodeId || !fieldName || !isStudioId(record.studioId)) {
+      throw new Error("Each workflow binding must include Node ID, Field, and Studio ID.");
+    }
+    return { nodeId, fieldName, studioId: record.studioId };
+  });
+  assertUniqueRunningHubBindings(bindings);
+  return bindings;
+}
+
 export function assertUniqueRunningHubBindings(bindings: RunningHubBinding[]): void {
   const seen = new Set<string>();
   for (const binding of bindings) {

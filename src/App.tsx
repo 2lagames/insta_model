@@ -617,6 +617,13 @@ export default function App() {
   }
 
   async function handleSaveConnections() {
+    const populatedRunningHubBindings = runningHubBindings.filter((binding) => binding.nodeId.trim() || binding.fieldName.trim());
+    const incompleteRunningHubBinding = populatedRunningHubBindings.some((binding) => !binding.nodeId.trim() || !binding.fieldName.trim());
+    if (incompleteRunningHubBinding) {
+      recordStatus({ tone: "error", message: "Each workflow binding needs both Node ID and Field before it can be saved." });
+      return;
+    }
+
     setIsSavingConnections(true);
     try {
       const saved = await saveConnections({
@@ -625,7 +632,7 @@ export default function App() {
         ollamaLocalModel,
         ollamaPromptInstruction,
         runningHubWorkflowId,
-        runningHubBindings
+        ...(populatedRunningHubBindings.length > 0 ? { runningHubBindings: populatedRunningHubBindings } : {})
       });
       setConnections(saved);
       setRunningHubWorkflowId(saved.runningHubWorkflowId ?? "");

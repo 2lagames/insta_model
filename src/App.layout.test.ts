@@ -124,6 +124,16 @@ describe("studio preview layout", () => {
     expect(preview).toContain("generatedMaterials");
   });
 
+  it("saves only completed workflow bindings so an empty draft cannot overwrite saved rules", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const saveStart = appSource.indexOf("async function handleSaveConnections()");
+    const saveHandler = appSource.slice(saveStart, appSource.indexOf("function updateRunningHubBinding", saveStart));
+
+    expect(saveHandler).toContain("const populatedRunningHubBindings");
+    expect(saveHandler).toContain("const incompleteRunningHubBinding");
+    expect(saveHandler).toContain("...(populatedRunningHubBindings.length > 0 ? { runningHubBindings: populatedRunningHubBindings } : {})");
+  });
+
   it("offers explicit prompt saving and describes a local image source", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
 
