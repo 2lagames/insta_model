@@ -125,6 +125,7 @@ describe("studio preview layout", () => {
     expect(preview).not.toContain("Studio ID");
     expect(preview).toContain('className="media-column generated-media-column"');
     expect(readFileSync("src/App.css", "utf8")).toContain(".generated-media-column .gallery-item {");
+    expect(readFileSync("src/App.css", "utf8")).toContain("grid-template-columns: repeat(4, 116px);");
   });
 
   it("saves only completed workflow bindings so an empty draft cannot overwrite saved rules", () => {
