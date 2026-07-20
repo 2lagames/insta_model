@@ -1,4 +1,4 @@
-import type { PrivateConnections } from "./connectionsStore";
+import { getOllamaPresets, type PrivateConnections } from "./connectionsStore";
 
 export function getActiveOllamaConfiguration(connections: PrivateConnections): {
   provider: "cloud" | "local";
@@ -23,4 +23,13 @@ export function getActiveOllamaConfiguration(connections: PrivateConnections): {
     model,
     instruction: connections.ollamaPromptInstruction.trim()
   };
+}
+
+export function getOllamaConfigurationForPreset(connections: PrivateConnections, presetId: string) {
+  const preset = getOllamaPresets(connections).find((item) => item.id === presetId);
+  if (!preset) throw new Error("Select an available Ollama workflow before prompt generation.");
+  if (!preset.model) throw new Error(`Select an Ollama ${preset.provider === "cloud" ? "Cloud" : "local"} model before prompt generation.`);
+  if (preset.provider === "cloud" && !connections.ollamaCloudApiKey?.trim()) throw new Error("Add Ollama Cloud API key on the Настройки tab before prompt generation.");
+  if (!preset.promptInstruction) throw new Error("Add a prompt instruction before prompt generation.");
+  return { provider: preset.provider, apiKey: connections.ollamaCloudApiKey, model: preset.model, instruction: preset.promptInstruction };
 }

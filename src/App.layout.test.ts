@@ -61,7 +61,7 @@ describe("studio preview layout", () => {
 
     expect(appSource).toContain('className="media-column generated-media-column"');
     expect(cssSource).toContain(".generated-media-column .media-selector {");
-    expect(cssSource).toContain("grid-auto-rows: 42px");
+    expect(cssSource).toContain("grid-auto-rows: minmax(42px, auto);");
     expect(cssSource).not.toContain("--studio-stage-height");
     expect(cssSource).toContain("overflow-y: auto");
   });
@@ -129,14 +129,14 @@ describe("studio preview layout", () => {
     expect(readFileSync("src/App.css", "utf8")).toContain("grid-template-columns: repeat(4, 116px);");
   });
 
-  it("saves only completed workflow bindings so an empty draft cannot overwrite saved rules", () => {
+  it("saves workflow and Ollama preset catalogs", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const saveStart = appSource.indexOf("async function handleSaveConnections()");
-    const saveHandler = appSource.slice(saveStart, appSource.indexOf("function updateRunningHubBinding", saveStart));
+    const saveHandler = appSource.slice(saveStart, appSource.indexOf("function addRunningHubWorkflow", saveStart));
 
-    expect(saveHandler).toContain("const populatedRunningHubBindings");
-    expect(saveHandler).toContain("const incompleteRunningHubBinding");
-    expect(saveHandler).toContain("...(populatedRunningHubBindings.length > 0 ? { runningHubBindings: populatedRunningHubBindings } : {})");
+    expect(saveHandler).toContain("runningHubWorkflows");
+    expect(saveHandler).toContain("ollamaPresets");
+    expect(saveHandler).toContain("studioActionButtons");
   });
 
   it("offers explicit prompt saving and describes a local image source", () => {
@@ -193,7 +193,7 @@ describe("studio preview layout", () => {
     expect(autosave).toContain("if (revision !== promptAutosaveRevisionRef.current) {");
   });
 
-  it("supports batch local uploads and lets image generation create missing prompts", () => {
+  it("supports batch local uploads and keeps text generation explicit", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
 
     expect(appSource).toContain("multiple");
@@ -202,7 +202,7 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("toggleAllMediaSelection(current, sourceMaterials.map((material) => material.id))");
     expect(appSource).toContain('hasEveryMaterialSelected ? "Снять выделение" : "Выбрать все"');
     expect(appSource).toContain("setSelectedForGeneration([])");
-    expect(appSource).toContain("await createSelectedPrompts(abortController.signal)");
+    expect(appSource).toContain("Generate prompts with a text action before image generation.");
   });
 
   it("shows a cancellation action in the generation workspace and uses IMAGE labels", () => {
@@ -216,7 +216,7 @@ describe("studio preview layout", () => {
 
   it("adds each generated image to the studio before starting the next image job", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
-    const generationStart = appSource.indexOf("async function handleGenerateImages()");
+    const generationStart = appSource.indexOf("async function handleGenerateImages(runningHubWorkflowPresetId: string)");
     const generationHandler = appSource.slice(generationStart, appSource.indexOf("function handleCancelGeneration", generationStart));
 
     expect(generationHandler).toContain("for (const [batchIndex, imageJob] of imageJobs.entries())");
@@ -231,19 +231,19 @@ describe("studio preview layout", () => {
   it("lets users choose one to ten image generations per selected media item", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const cssSource = readFileSync("src/App.css", "utf8");
-    const generationStart = appSource.indexOf("async function handleGenerateImages()");
+    const generationStart = appSource.indexOf("async function handleGenerateImages(runningHubWorkflowPresetId: string)");
     const generationHandler = appSource.slice(generationStart, appSource.indexOf("function handleCancelGeneration", generationStart));
     const generationWorkspaceStart = appSource.indexOf("function GenerationWorkspace({");
     const generationWorkspace = appSource.slice(generationWorkspaceStart, appSource.indexOf("function MediaSelector", generationWorkspaceStart));
 
     expect(appSource).toContain("const [imageGenerationsPerMedia, setImageGenerationsPerMedia] = useState(1);");
     expect(generationHandler).toContain("repeatImageGenerationJobs(promptImageJobs, imageGenerationsPerMedia)");
-    expect(generationWorkspace).toContain('className="image-generation-control"');
+    expect(generationWorkspace).toContain('className="studio-action-select"');
     expect(generationWorkspace).toContain('aria-label="Количество генераций на изображение"');
     expect(generationWorkspace).toContain("Array.from({ length: 10 }");
     expect(generationWorkspace).toContain("Image generation (${imageGenerationCount})");
-    expect(cssSource).toContain(".image-generation-control {");
-    expect(cssSource).toContain(".image-generation-control select {");
+    expect(cssSource).toContain(".studio-action-button {");
+    expect(cssSource).toContain(".studio-action-select");
   });
 
   it("keeps every successful batch upload reflected locally before a later upload can fail", () => {
@@ -294,7 +294,7 @@ describe("studio preview layout", () => {
     expect(controls).toContain('event.key === "Enter" && !isSessionMutationBusy');
     expect(preview).toContain("isSessionMutationBusy={isSessionMutationBusy}");
     expect(generationWorkspace).toContain("isSessionMutationBusy: boolean;");
-    expect(generationWorkspace).toContain("disabled={isSessionMutationBusy || selectedForGenerationCount === 0}");
+    expect(generationWorkspace).toContain("disabled={isSessionMutationBusy || selectedForGenerationCount === 0 || !ready}");
     expect(generationWorkspace).toContain("disabled={isSessionMutationBusy}");
     expect(preview).toContain("isBusy={isSessionMutationBusy}");
     expect(reset).toContain("if (!tryBeginSessionMutation())");
@@ -303,5 +303,48 @@ describe("studio preview layout", () => {
     expect(savePrompt).toContain("if (!tryBeginSessionMutation())");
     expect(savePrompt).toContain("setIsSavingPrompt(true);");
     expect(savePrompt).toContain("setIsSavingPrompt(false);");
+  });
+
+  it("lays out Ollama presets across the Settings card and places add actions at the bottom", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const cssSource = readFileSync("src/App.css", "utf8");
+
+    expect(appSource).toContain("ollama-preset-layout");
+    expect(appSource).toContain("preset-add-button");
+    expect(appSource).toContain("preset-add-row");
+    expect(cssSource).toContain(".ollama-preset-layout {");
+    expect(cssSource).toContain("grid-template-columns: minmax(220px, 0.2fr) minmax(0, 0.8fr);");
+    expect(cssSource).toContain(".ollama-preset-layout .ollama-preset-instruction {");
+    expect(cssSource).toContain(".preset-add-row {");
+    expect(appSource).toContain("getEditableRunningHubBindings(workflow.bindings)");
+  });
+
+  it("shows only explicitly added generation actions and lets their list grow", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const cssSource = readFileSync("src/App.css", "utf8");
+    const generationWorkspaceStart = appSource.indexOf("function GenerationWorkspace({");
+    const generationWorkspace = appSource.slice(generationWorkspaceStart, appSource.indexOf("function MediaSelector", generationWorkspaceStart));
+
+    expect(generationWorkspace).not.toContain("Video generation");
+    expect(generationWorkspace).not.toContain("Trend analysis");
+    expect(generationWorkspace).not.toContain("Caption and hashtags");
+    expect(cssSource).toContain("grid-auto-rows: minmax(42px, auto);");
+  });
+
+  it("places generation action add controls below cancellation", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const generationWorkspaceStart = appSource.indexOf("function GenerationWorkspace({");
+    const generationWorkspace = appSource.slice(generationWorkspaceStart, appSource.indexOf("function MediaSelector", generationWorkspaceStart));
+
+    expect(generationWorkspace.indexOf("onClick={onCancelGeneration}")).toBeLessThan(generationWorkspace.indexOf('className="studio-action-add"'));
+  });
+
+  it("keeps workflow selectors compact without clipping their selected IDs", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const cssSource = readFileSync("src/App.css", "utf8");
+
+    expect(appSource).toContain("<option value=\"\">□</option>");
+    expect(appSource).toContain("<option key={preset.id} value={preset.id}>{preset.displayId}</option>");
+    expect(cssSource).toContain("grid-template-columns: minmax(0, 1fr) 84px 42px 32px;");
   });
 });

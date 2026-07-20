@@ -286,7 +286,7 @@ input {
   display: grid;
   grid-template-columns: 1fr;
   gap: 8px;
-  grid-auto-rows: 42px;
+  grid-auto-rows: minmax(42px, auto);
   align-content: start;
   padding: 14px;
 }
@@ -322,6 +322,24 @@ input {
 .generation-prefix-control select { padding: 0 12px; }
 .generation-prefix-control button { padding: 0; cursor: pointer; font-size: 20px; }
 .image-generation-control select { padding: 0; text-align: center; }
+
+.studio-action-add,
+.studio-action-list,
+.studio-action-button,
+.preset-card-list,
+.preset-card {
+  display: grid;
+  gap: 8px;
+}
+
+.studio-action-add { grid-template-columns: 1fr 1fr; }
+.studio-action-button { grid-template-columns: minmax(0, 1fr) 84px 42px 32px; align-items: center; cursor: grab; }
+.studio-action-text { grid-template-columns: minmax(0, 1fr) 84px 32px; }
+.studio-action-select,
+.studio-action-remove { height: 42px; min-width: 0; border: 1px solid #2c2a26; border-radius: 8px; background: #fffdf8; }
+.studio-action-select { padding: 0; text-align: center; }
+.studio-workflow-select { padding: 0 4px; text-align: center; }
+.studio-action-remove { cursor: pointer; }
 
 .generation-panel button:disabled {
   color: #8d857a;
@@ -554,7 +572,7 @@ input {
 }
 
 .ollama-card {
-  grid-template-columns: minmax(560px, 0.95fr) minmax(420px, 1.05fr);
+  grid-template-columns: 1fr;
   align-items: start;
 }
 
@@ -591,6 +609,53 @@ input {
 .runninghub-card .connections-grid label:first-child {
   grid-column: 1 / -1;
   max-width: 420px;
+}
+
+.preset-card {
+  border: 1px solid #ded8ce;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fffdf8;
+}
+
+.preset-card-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.preset-card-header h3 { margin: 0; }
+
+.ollama-preset-layout {
+  grid-template-columns: minmax(220px, 0.2fr) minmax(0, 0.8fr);
+  align-items: stretch;
+  gap: 14px;
+}
+
+.ollama-preset-layout > .preset-card-header {
+  grid-column: 1 / -1;
+}
+
+.ollama-preset-settings {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.ollama-preset-layout .ollama-preset-instruction {
+  grid-column: 2;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ollama-preset-layout .ollama-preset-instruction textarea {
+  min-height: 184px;
+  height: 184px;
+  max-width: 100%;
+}
+
+.preset-add-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.preset-add-button {
+  min-width: max-content;
 }
 
 .runninghub-bindings {
@@ -847,6 +912,15 @@ input {
 
   .generation-panel {
     grid-template-columns: 1fr;
+  }
+
+  .ollama-preset-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .ollama-preset-layout > .preset-card-header,
+  .ollama-preset-layout .ollama-preset-instruction {
+    grid-column: auto;
   }
 
   .generated-media-column .media-list {

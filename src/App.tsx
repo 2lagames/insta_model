@@ -35,6 +35,7 @@ import {
 import type { PromptMediaInput } from "./lib/promptTypes";
 import { createStatusLogText } from "./lib/statusLog";
 import { studioIds, type RunningHubBinding } from "./lib/studioBindings";
+import { nextPresetDisplayId, reorderStudioActionButtons, type OllamaPreset, type RunningHubWorkflowPreset, type StudioActionButton, type StudioActionType } from "./lib/generationPresets";
 
 type ActiveTab = "studio" | "connections";
 type StatusTone = "idle" | "running" | "error" | "ready";
@@ -57,6 +58,10 @@ const emptyCurrentSession: CurrentMediaSession = {
 };
 
 const emptyRunningHubBinding: RunningHubBinding = { nodeId: "", fieldName: "", studioId: "1" };
+
+function getEditableRunningHubBindings(bindings: RunningHubBinding[]): RunningHubBinding[] {
+  return bindings.length > 0 ? bindings : [emptyRunningHubBinding];
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("studio");
@@ -87,16 +92,17 @@ export default function App() {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [connections, setConnections] = useState<PublicConnections>({
     hasApifyApiToken: false,
-    hasRunningHubApiKey: false
+    hasRunningHubApiKey: false,
+    runningHubWorkflows: [],
+    ollamaPresets: [],
+    studioActionButtons: []
   });
   const [editingKey, setEditingKey] = useState<ConnectionKeyName | null>(null);
   const [isSavingKey, setIsSavingKey] = useState(false);
-  const [runningHubWorkflowId, setRunningHubWorkflowId] = useState("");
-  const [runningHubBindings, setRunningHubBindings] = useState<RunningHubBinding[]>([emptyRunningHubBinding]);
-  const [ollamaProvider, setOllamaProvider] = useState<"cloud" | "local">("local");
-  const [ollamaCloudModel, setOllamaCloudModel] = useState("");
-  const [ollamaLocalModel, setOllamaLocalModel] = useState("");
-  const [ollamaPromptInstruction, setOllamaPromptInstruction] = useState("");
+  const [runningHubWorkflows, setRunningHubWorkflows] = useState<RunningHubWorkflowPreset[]>([]);
+  const [ollamaPresets, setOllamaPresets] = useState<OllamaPreset[]>([]);
+  const [studioActionButtons, setStudioActionButtons] = useState<StudioActionButton[]>([]);
+  const [draggedStudioActionId, setDraggedStudioActionId] = useState<string | null>(null);
   const [generationPrefixOptions, setGenerationPrefixOptions] = useState("");
   const [generationPrefixSelection, setGenerationPrefixSelection] = useState("");
   const [isEditingGenerationPrefixes, setIsEditingGenerationPrefixes] = useState(false);
@@ -227,12 +233,9 @@ export default function App() {
     getConnections()
       .then((loadedConnections) => {
         setConnections(loadedConnections);
-        setRunningHubWorkflowId(loadedConnections.runningHubWorkflowId ?? "");
-        setRunningHubBindings(loadedConnections.runningHubBindings?.length ? loadedConnections.runningHubBindings : [emptyRunningHubBinding]);
-        setOllamaProvider(loadedConnections.ollamaProvider ?? "local");
-        setOllamaCloudModel(loadedConnections.ollamaCloudModel ?? "");
-        setOllamaLocalModel(loadedConnections.ollamaLocalModel ?? "");
-        setOllamaPromptInstruction(loadedConnections.ollamaPromptInstruction ?? "");
+        setRunningHubWorkflows(loadedConnections.runningHubWorkflows);
+        setOllamaPresets(loadedConnections.ollamaPresets);
+        setStudioActionButtons(loadedConnections.studioActionButtons);
         setGenerationPrefixOptions(loadedConnections.generationPrefixOptions ?? "");
         setGenerationPrefixSelection(loadedConnections.generationPrefixSelection ?? "");
         if (loadedConnections.hasOllamaCloudApiKey) {
@@ -428,24 +431,14 @@ export default function App() {
     }
   }
 
-  async function createSelectedPrompts(signal?: AbortSignal): Promise<Array<{ mediaId: string; label: string; prompt: string }>> {
+  async function createSelectedPrompts(ollamaPresetId: string, signal?: AbortSignal): Promise<Array<{ mediaId: string; label: string; prompt: string }>> {
     const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
     const documentsByMediaId = new Map(promptDocuments.map((document) => [document.mediaId, document]));
     const missingPromptMedia = selectedPromptMedia.filter((media) => !documentsByMediaId.has(media.id));
-    const savedConnections = await saveConnections({
-      ollamaProvider,
-      ollamaCloudModel,
-      ollamaLocalModel,
-      ollamaPromptInstruction,
-      generationPrefixOptions,
-      generationPrefixSelection
-    });
-    setConnections(savedConnections);
-
     let generatedPrompts: Array<{ mediaId: string; label: string; prompt: string }> = [];
     const prefix = parseGenerationPrefixes(generationPrefixOptions).find((item) => item.name === generationPrefixSelection)?.text;
     for (const media of missingPromptMedia) {
-      const generated = await generateImagePromptsWithOptions([media], { signal });
+      const generated = await generateImagePromptsWithOptions([media], { ollamaPresetId, signal });
       const generatedPrompt = generated.prompts[0];
       if (!generatedPrompt) {
         continue;
@@ -472,7 +465,7 @@ export default function App() {
     });
   }
 
-  async function handleGenerateImagePrompts() {
+  async function handleGenerateImagePrompts(ollamaPresetId: string) {
     const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
     if (selectedPromptMedia.length === 0) {
       recordStatus({ tone: "error", message: "Select one or more Media items before prompt generation." });
@@ -488,7 +481,7 @@ export default function App() {
     generationAbortControllerRef.current = abortController;
     recordStatus({ tone: "running", message: "Generating prompts with the selected Ollama model." });
     try {
-      await createSelectedPrompts(abortController.signal);
+      await createSelectedPrompts(ollamaPresetId, abortController.signal);
     } catch (error) {
       if (!isAbortError(error)) {
         recordStatus({ tone: "error", message: toErrorMessage(error) });
@@ -546,7 +539,7 @@ export default function App() {
     }
   }
 
-  async function handleGenerateImages() {
+  async function handleGenerateImages(runningHubWorkflowPresetId: string) {
     const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
     if (selectedPromptMedia.length === 0) {
       recordStatus({ tone: "error", message: "Select one or more Media items before image generation." });
@@ -562,15 +555,16 @@ export default function App() {
     generationAbortControllerRef.current = abortController;
     recordStatus({ tone: "running", message: "Sending the current edited prompts and source images to RunningHub." });
     try {
-      const selectedPrompts = await createSelectedPrompts(abortController.signal);
-      const promptsByMediaId = new Map(selectedPrompts.map((prompt) => [prompt.mediaId, prompt.prompt]));
+      const promptsByMediaId = new Map(promptDocuments.map((document) => [document.mediaId, getCurrentPrompt(document)]));
       const promptImageJobs = selectedPromptMedia.flatMap((media) => {
         const prompt = promptsByMediaId.get(media.id);
         return prompt === undefined ? [] : [{ media, prompt }];
       });
+      if (promptImageJobs.length !== selectedPromptMedia.length) throw new Error("Generate prompts with a text action before image generation.");
       const imageJobs = repeatImageGenerationJobs(promptImageJobs, imageGenerationsPerMedia);
       for (const [batchIndex, imageJob] of imageJobs.entries()) {
         const generated = await generateImagesWithOptions([imageJob], {
+          runningHubWorkflowPresetId,
           signal: abortController.signal,
           batchPosition: batchIndex + 1,
           batchTotal: imageJobs.length
@@ -621,26 +615,19 @@ export default function App() {
   }
 
   async function handleSaveConnections() {
-    const populatedRunningHubBindings = runningHubBindings.filter((binding) => binding.nodeId.trim() || binding.fieldName.trim());
-    const incompleteRunningHubBinding = populatedRunningHubBindings.some((binding) => !binding.nodeId.trim() || !binding.fieldName.trim());
-    if (incompleteRunningHubBinding) {
-      recordStatus({ tone: "error", message: "Each workflow binding needs both Node ID and Field before it can be saved." });
-      return;
-    }
-
     setIsSavingConnections(true);
     try {
       const saved = await saveConnections({
-        ollamaProvider,
-        ollamaCloudModel,
-        ollamaLocalModel,
-        ollamaPromptInstruction,
-        runningHubWorkflowId,
-        ...(populatedRunningHubBindings.length > 0 ? { runningHubBindings: populatedRunningHubBindings } : {})
+        runningHubWorkflows,
+        ollamaPresets,
+        studioActionButtons,
+        generationPrefixOptions,
+        generationPrefixSelection
       });
       setConnections(saved);
-      setRunningHubWorkflowId(saved.runningHubWorkflowId ?? "");
-      setRunningHubBindings(saved.runningHubBindings?.length ? saved.runningHubBindings : [emptyRunningHubBinding]);
+      setRunningHubWorkflows(saved.runningHubWorkflows);
+      setOllamaPresets(saved.ollamaPresets);
+      setStudioActionButtons(saved.studioActionButtons);
       recordStatus({ tone: "ready", message: "Connections saved locally." });
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
@@ -649,16 +636,47 @@ export default function App() {
     }
   }
 
-  function updateRunningHubBinding(index: number, update: Partial<RunningHubBinding>) {
-    setRunningHubBindings((current) => current.map((binding, bindingIndex) => bindingIndex === index ? { ...binding, ...update } : binding));
+  function addRunningHubWorkflow() {
+    setRunningHubWorkflows((current) => [...current, { id: crypto.randomUUID(), displayId: nextPresetDisplayId("RH", current), workflowId: "", bindings: [emptyRunningHubBinding] }]);
   }
 
-  function addRunningHubBinding() {
-    setRunningHubBindings((current) => [...current, emptyRunningHubBinding]);
+  function addOllamaPreset() {
+    setOllamaPresets((current) => [...current, { id: crypto.randomUUID(), displayId: nextPresetDisplayId("OL", current), provider: "local", model: "", promptInstruction: "" }]);
   }
 
-  function removeRunningHubBinding(index: number) {
-    setRunningHubBindings((current) => current.length === 1 ? [emptyRunningHubBinding] : current.filter((_, bindingIndex) => bindingIndex !== index));
+  function updateRunningHubWorkflow(id: string, update: Partial<RunningHubWorkflowPreset>) {
+    setRunningHubWorkflows((current) => current.map((workflow) => workflow.id === id ? { ...workflow, ...update } : workflow));
+  }
+
+  function updateOllamaPreset(id: string, update: Partial<OllamaPreset>) {
+    setOllamaPresets((current) => current.map((preset) => preset.id === id ? { ...preset, ...update } : preset));
+  }
+
+  function addStudioAction(type: StudioActionType) {
+    persistStudioActionButtons([...studioActionButtons, { id: crypto.randomUUID(), label: type === "text" ? "Генерация текста" : "Генерация изображения", type, order: studioActionButtons.length }]);
+  }
+
+  function updateStudioAction(id: string, update: Partial<StudioActionButton>) {
+    persistStudioActionButtons(studioActionButtons.map((button) => button.id === id ? { ...button, ...update } : button));
+  }
+
+  function moveStudioAction(targetId: string) {
+    if (draggedStudioActionId) persistStudioActionButtons(reorderStudioActionButtons(studioActionButtons, draggedStudioActionId, targetId));
+    setDraggedStudioActionId(null);
+  }
+
+  function removeStudioAction(id: string) {
+    persistStudioActionButtons(studioActionButtons.filter((button) => button.id !== id).map((button, order) => ({ ...button, order })));
+  }
+
+  function persistStudioActionButtons(next: StudioActionButton[]) {
+    setStudioActionButtons(next);
+    void saveConnections({ runningHubWorkflows, ollamaPresets, studioActionButtons: next, generationPrefixOptions, generationPrefixSelection })
+      .then((saved) => {
+        setConnections(saved);
+        setStudioActionButtons(saved.studioActionButtons);
+      })
+      .catch((error: unknown) => recordStatus({ tone: "error", message: toErrorMessage(error) }));
   }
 
   function handleEditKey(keyName: ConnectionKeyName) {
@@ -811,6 +829,9 @@ export default function App() {
                 generationPrefixOptions={generationPrefixOptions}
                 generationPrefixSelection={generationPrefixSelection}
                 imageGenerationsPerMedia={imageGenerationsPerMedia}
+                ollamaPresets={ollamaPresets}
+                runningHubWorkflows={runningHubWorkflows}
+                studioActionButtons={studioActionButtons}
                 onChangePrefix={setGenerationPrefixSelection}
                 onChangeImageGenerationsPerMedia={setImageGenerationsPerMedia}
                 onEditPrefixes={() => setIsEditingGenerationPrefixes(true)}
@@ -819,6 +840,11 @@ export default function App() {
                 isGeneratingImages={isGeneratingImages}
                 onGenerateImages={handleGenerateImages}
                 onGenerateImagePrompts={handleGenerateImagePrompts}
+                onAddStudioAction={addStudioAction}
+                onUpdateStudioAction={updateStudioAction}
+                onRemoveStudioAction={removeStudioAction}
+                onDragStudioAction={setDraggedStudioActionId}
+                onDropStudioAction={moveStudioAction}
                 onCancelGeneration={handleCancelGeneration}
                 onSavePrompt={handleSavePrompt}
                 onSelectMaterial={(material) => {
@@ -860,70 +886,24 @@ export default function App() {
           </div>
           <div className="connection-card ollama-card">
             <div className="ollama-settings">
-              <h2>Ollama</h2>
-              <div className="provider-toggle" role="group" aria-label="Источник Ollama">
-                <button className={ollamaProvider === "cloud" ? "active" : ""} onClick={() => setOllamaProvider("cloud")} type="button">Ollama Cloud</button>
-                <button className={ollamaProvider === "local" ? "active" : ""} onClick={() => setOllamaProvider("local")} type="button">Локальная Ollama</button>
-              </div>
+              <div className="preset-card-header"><h2>Ollama</h2></div>
               <KeyStatus hasKey={connections.hasOllamaCloudApiKey === true} preview={connections.ollamaCloudApiKeyPreview} />
               <KeyActions disabled={isSavingKey} onClear={() => void handleClearKey("ollamaCloudApiKey")} onEdit={() => handleEditKey("ollamaCloudApiKey")} />
-              <div className="ollama-models">
-                <label>
-                <span>Cloud model</span>
-                <div className="model-control">
-                  <select disabled={!connections.hasOllamaCloudApiKey} onChange={(event) => setOllamaCloudModel(event.target.value)} value={ollamaCloudModel}>
-                    <option value="">Выберите модель</option>
-                    {cloudModels.map((model) => <option key={model} value={model}>{model}</option>)}
-                  </select>
-                  <button aria-label="Обновить модели Ollama Cloud" disabled={!connections.hasOllamaCloudApiKey || isRefreshingCloudModels} onClick={() => void refreshOllamaModels("cloud")} type="button">↻</button>
-                </div>
-              </label>
-                <label>
-                <span>Local model</span>
-                <div className="model-control">
-                  <select onChange={(event) => setOllamaLocalModel(event.target.value)} value={ollamaLocalModel}>
-                    <option value="">Выберите модель</option>
-                    {localModels.map((model) => <option key={model} value={model}>{model}</option>)}
-                  </select>
-                  <button aria-label="Обновить модели локальной Ollama" disabled={isRefreshingLocalModels} onClick={() => void refreshOllamaModels("local")} type="button">↻</button>
-                </div>
-              </label>
-              </div>
             </div>
-            <label className="instruction-control">
-              <span>Промт для генерации</span>
-              <textarea onChange={(event) => setOllamaPromptInstruction(event.target.value)} placeholder="Инструкция для генерации промта" rows={8} value={ollamaPromptInstruction} />
-            </label>
+            <div className="preset-card-list">{ollamaPresets.map((preset) => <section className="preset-card ollama-preset-layout" key={preset.id}><div className="preset-card-header"><h3>{preset.displayId}</h3><button onClick={() => setOllamaPresets((current) => current.filter((item) => item.id !== preset.id))} type="button">−</button></div><div className="ollama-preset-settings"><div className="provider-toggle"><button className={preset.provider === "cloud" ? "active" : ""} onClick={() => updateOllamaPreset(preset.id, { provider: "cloud", model: "" })} type="button">Ollama Cloud</button><button className={preset.provider === "local" ? "active" : ""} onClick={() => updateOllamaPreset(preset.id, { provider: "local", model: "" })} type="button">Локальная Ollama</button></div><label><span>Модель</span><div className="model-control"><select disabled={preset.provider === "cloud" && !connections.hasOllamaCloudApiKey} onChange={(event) => updateOllamaPreset(preset.id, { model: event.target.value })} value={preset.model}><option value="">Выберите модель</option>{(preset.provider === "cloud" ? cloudModels : localModels).map((model) => <option key={model} value={model}>{model}</option>)}</select><button onClick={() => void refreshOllamaModels(preset.provider)} type="button">↻</button></div></label></div><label className="instruction-control ollama-preset-instruction"><span>Промт для генерации</span><textarea onChange={(event) => updateOllamaPreset(preset.id, { promptInstruction: event.target.value })} rows={8} value={preset.promptInstruction} /></label></section>)}</div>
+            <div className="preset-add-row"><button className="secondary-button preset-add-button" onClick={addOllamaPreset} type="button">＋ Добавить Ollama</button></div>
           </div>
           <div className="connection-card runninghub-card">
-            <div>
-              <h2>RunningHub ComfyUI</h2>
+            <div className="preset-card-header">
+              <div><h2>RunningHub ComfyUI</h2>
               <KeyStatus hasKey={connections.hasRunningHubApiKey} preview={connections.runningHubApiKeyPreview} />
-            </div>
+              </div></div>
             <KeyActions disabled={isSavingKey} onClear={() => void handleClearKey("runningHubApiKey")} onEdit={() => handleEditKey("runningHubApiKey")} />
-            <div className="connections-grid">
-              <label>
-                <span>Workflow ID</span>
-                <input
-                  className="secret-input"
-                  onChange={(event) => setRunningHubWorkflowId(event.target.value)}
-                  placeholder="1904136902449209346"
-                  value={runningHubWorkflowId}
-                />
-              </label>
-            </div>
-            <div className="runninghub-bindings" aria-label="Подстановки RunningHub">
-              <div className="runninghub-bindings-title">Workflow bindings</div>
-              {runningHubBindings.map((binding, index) => (
-                <div className="runninghub-binding-row" key={`${index}-${binding.studioId}`}>
-                  <label><span>Node ID</span><input className="secret-input" onChange={(event) => updateRunningHubBinding(index, { nodeId: event.target.value })} placeholder="39" value={binding.nodeId} /></label>
-                  <label><span>Field</span><input className="secret-input" onChange={(event) => updateRunningHubBinding(index, { fieldName: event.target.value })} placeholder="image" value={binding.fieldName} /></label>
-                  <label><span>Studio ID</span><select onChange={(event) => updateRunningHubBinding(index, { studioId: event.target.value as RunningHubBinding["studioId"] })} value={binding.studioId}>{studioIds.map((studioId) => <option key={studioId} value={studioId}>{getStudioIdLabel(studioId)}</option>)}</select></label>
-                  <button aria-label="Добавить подстановку workflow" className="binding-icon-button" onClick={addRunningHubBinding} type="button">+</button>
-                  <button aria-label="Удалить подстановку workflow" className="binding-icon-button" onClick={() => removeRunningHubBinding(index)} type="button">−</button>
-                </div>
-              ))}
-            </div>
+            <div className="preset-card-list">{runningHubWorkflows.map((workflow) => {
+              const editableBindings = getEditableRunningHubBindings(workflow.bindings);
+              return <section className="preset-card" key={workflow.id}><div className="preset-card-header"><h3>{workflow.displayId}</h3><button onClick={() => setRunningHubWorkflows((current) => current.filter((item) => item.id !== workflow.id))} type="button">−</button></div><label><span>Workflow ID</span><input className="secret-input" onChange={(event) => updateRunningHubWorkflow(workflow.id, { workflowId: event.target.value })} value={workflow.workflowId} /></label><div className="runninghub-bindings"><div className="runninghub-bindings-title">Workflow bindings</div>{editableBindings.map((binding, index) => <div className="runninghub-binding-row" key={`${workflow.id}-${index}`}><label><span>Node ID</span><input className="secret-input" onChange={(event) => updateRunningHubWorkflow(workflow.id, { bindings: editableBindings.map((item, itemIndex) => itemIndex === index ? { ...item, nodeId: event.target.value } : item) })} value={binding.nodeId} /></label><label><span>Field</span><input className="secret-input" onChange={(event) => updateRunningHubWorkflow(workflow.id, { bindings: editableBindings.map((item, itemIndex) => itemIndex === index ? { ...item, fieldName: event.target.value } : item) })} value={binding.fieldName} /></label><label><span>Studio ID</span><select onChange={(event) => updateRunningHubWorkflow(workflow.id, { bindings: editableBindings.map((item, itemIndex) => itemIndex === index ? { ...item, studioId: event.target.value as RunningHubBinding["studioId"] } : item) })} value={binding.studioId}>{studioIds.map((studioId) => <option key={studioId} value={studioId}>{getStudioIdLabel(studioId)}</option>)}</select></label><button className="binding-icon-button" onClick={() => updateRunningHubWorkflow(workflow.id, { bindings: [...editableBindings, emptyRunningHubBinding] })} type="button">+</button><button className="binding-icon-button" onClick={() => updateRunningHubWorkflow(workflow.id, { bindings: editableBindings.length === 1 ? [emptyRunningHubBinding] : editableBindings.filter((_, itemIndex) => itemIndex !== index) })} type="button">−</button></div>)}</div></section>;
+            })}</div>
+            <div className="preset-add-row"><button className="secondary-button preset-add-button" onClick={addRunningHubWorkflow} type="button">＋ Добавить workflow</button></div>
           </div>
           <button
             className="primary-button save-connections-button"
@@ -947,6 +927,9 @@ function Preview({
   generationPrefixOptions,
   generationPrefixSelection,
   imageGenerationsPerMedia,
+  ollamaPresets,
+  runningHubWorkflows,
+  studioActionButtons,
   onChangePrefix,
   onChangeImageGenerationsPerMedia,
   onEditPrefixes,
@@ -955,6 +938,11 @@ function Preview({
   isGeneratingImages,
   onGenerateImages,
   onGenerateImagePrompts,
+  onAddStudioAction,
+  onUpdateStudioAction,
+  onRemoveStudioAction,
+  onDragStudioAction,
+  onDropStudioAction,
   onCancelGeneration,
   onSavePrompt,
   onSelectMaterial,
@@ -972,14 +960,22 @@ function Preview({
   generationPrefixOptions: string;
   generationPrefixSelection: string;
   imageGenerationsPerMedia: number;
+  ollamaPresets: OllamaPreset[];
+  runningHubWorkflows: RunningHubWorkflowPreset[];
+  studioActionButtons: StudioActionButton[];
   onChangePrefix: (value: string) => void;
   onChangeImageGenerationsPerMedia: (value: number) => void;
   onEditPrefixes: () => void;
   isSessionMutationBusy: boolean;
   isGeneratingPrompt: boolean;
   isGeneratingImages: boolean;
-  onGenerateImages: () => void;
-  onGenerateImagePrompts: () => void;
+  onGenerateImages: (presetId: string) => void;
+  onGenerateImagePrompts: (presetId: string) => void;
+  onAddStudioAction: (type: StudioActionType) => void;
+  onUpdateStudioAction: (id: string, update: Partial<StudioActionButton>) => void;
+  onRemoveStudioAction: (id: string) => void;
+  onDragStudioAction: (id: string | null) => void;
+  onDropStudioAction: (id: string) => void;
   onCancelGeneration: () => void;
   onSavePrompt: (mediaId: string) => void;
   onSelectMaterial: (material: MediaMaterial) => void;
@@ -1022,6 +1018,9 @@ function Preview({
           generationPrefixOptions={generationPrefixOptions}
           generationPrefixSelection={generationPrefixSelection}
           imageGenerationsPerMedia={imageGenerationsPerMedia}
+          ollamaPresets={ollamaPresets}
+          runningHubWorkflows={runningHubWorkflows}
+          studioActionButtons={studioActionButtons}
           onChangePrefix={onChangePrefix}
           onChangeImageGenerationsPerMedia={onChangeImageGenerationsPerMedia}
           onEditPrefixes={onEditPrefixes}
@@ -1030,6 +1029,11 @@ function Preview({
           isGeneratingPrompt={isGeneratingPrompt}
           onGenerateImages={onGenerateImages}
           onGenerateImagePrompts={onGenerateImagePrompts}
+          onAddStudioAction={onAddStudioAction}
+          onUpdateStudioAction={onUpdateStudioAction}
+          onRemoveStudioAction={onRemoveStudioAction}
+          onDragStudioAction={onDragStudioAction}
+          onDropStudioAction={onDropStudioAction}
           onCancelGeneration={onCancelGeneration}
           selectedForGenerationCount={selectedForGenerationCount}
         />
@@ -1060,6 +1064,9 @@ function GenerationWorkspace({
   generationPrefixOptions,
   generationPrefixSelection,
   imageGenerationsPerMedia,
+  ollamaPresets,
+  runningHubWorkflows,
+  studioActionButtons,
   onChangePrefix,
   onChangeImageGenerationsPerMedia,
   onEditPrefixes,
@@ -1068,52 +1075,71 @@ function GenerationWorkspace({
   isGeneratingPrompt,
   onGenerateImages,
   onGenerateImagePrompts,
+  onAddStudioAction,
+  onUpdateStudioAction,
+  onRemoveStudioAction,
+  onDragStudioAction,
+  onDropStudioAction,
   onCancelGeneration,
   selectedForGenerationCount
 }: {
   generationPrefixOptions: string;
   generationPrefixSelection: string;
   imageGenerationsPerMedia: number;
+  ollamaPresets: OllamaPreset[];
+  runningHubWorkflows: RunningHubWorkflowPreset[];
+  studioActionButtons: StudioActionButton[];
   onChangePrefix: (value: string) => void;
   onChangeImageGenerationsPerMedia: (value: number) => void;
   onEditPrefixes: () => void;
   isSessionMutationBusy: boolean;
   isGeneratingImages: boolean;
   isGeneratingPrompt: boolean;
-  onGenerateImages: () => void;
-  onGenerateImagePrompts: () => void;
+  onGenerateImages: (presetId: string) => void;
+  onGenerateImagePrompts: (presetId: string) => void;
+  onAddStudioAction: (type: StudioActionType) => void;
+  onUpdateStudioAction: (id: string, update: Partial<StudioActionButton>) => void;
+  onRemoveStudioAction: (id: string) => void;
+  onDragStudioAction: (id: string | null) => void;
+  onDropStudioAction: (id: string) => void;
   onCancelGeneration: () => void;
   selectedForGenerationCount: number;
 }) {
   const imageGenerationCount = selectedForGenerationCount * imageGenerationsPerMedia;
 
   return (
-    <div className="generation-column"><div className="panel-label">Generation workspace</div><aside className="generation-panel">
-      <div className="generation-prefix-control"><select onChange={(event) => onChangePrefix(event.target.value)} value={generationPrefixSelection}><option value="">Не выбрано</option>{parseGenerationPrefixes(generationPrefixOptions).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select><button aria-label="Редактировать варианты промта" onClick={onEditPrefixes} type="button">✎</button></div>
-      <button
-        disabled={isSessionMutationBusy || selectedForGenerationCount === 0}
-        onClick={onGenerateImagePrompts}
-        type="button"
-      >
-        {isGeneratingPrompt ? "Generating" : `Generate prompt (${selectedForGenerationCount})`}
-      </button>
-      <div className="image-generation-control">
-        <button
-          disabled={isSessionMutationBusy || selectedForGenerationCount === 0}
-          onClick={onGenerateImages}
-          type="button"
-        >
-          {isGeneratingImages ? "Generating" : `Image generation (${imageGenerationCount})`}
-        </button>
-        <select aria-label="Количество генераций на изображение" disabled={isSessionMutationBusy} onChange={(event) => onChangeImageGenerationsPerMedia(Number(event.target.value))} value={imageGenerationsPerMedia}>
-          {Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count}</option>)}
-        </select>
-      </div>
-      <button disabled type="button">Video generation</button>
-      <button disabled type="button">Trend analysis</button>
-      <button disabled type="button">Caption and hashtags</button>
-      <button onClick={onCancelGeneration} type="button">Отмена</button>
-    </aside></div>
+    <div className="generation-column">
+      <div className="panel-label">Generation workspace</div>
+      <aside className="generation-panel">
+        <div className="generation-prefix-control">
+          <select onChange={(event) => onChangePrefix(event.target.value)} value={generationPrefixSelection}>
+            <option value="">Не выбрано</option>
+            {parseGenerationPrefixes(generationPrefixOptions).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
+          </select>
+          <button aria-label="Редактировать варианты промта" onClick={onEditPrefixes} type="button">✎</button>
+        </div>
+        <div className="studio-action-list">
+          {studioActionButtons.map((action) => {
+            const presets = action.type === "text" ? ollamaPresets : runningHubWorkflows;
+            const ready = Boolean(action.presetId && presets.some((preset) => preset.id === action.presetId));
+            return <div className={`studio-action-button studio-action-${action.type}`} draggable={true} key={action.id} onDragEnd={() => onDragStudioAction(null)} onDragOver={(event) => event.preventDefault()} onDragStart={() => onDragStudioAction(action.id)} onDrop={() => onDropStudioAction(action.id)}>
+              <button disabled={isSessionMutationBusy || selectedForGenerationCount === 0 || !ready} onClick={() => action.presetId && (action.type === "text" ? onGenerateImagePrompts(action.presetId) : onGenerateImages(action.presetId))} type="button">{action.type === "text" ? (isGeneratingPrompt ? "Generating" : `Generate prompt (${selectedForGenerationCount})`) : (isGeneratingImages ? "Generating" : `Image generation (${imageGenerationCount})`)}</button>
+              <select aria-label={action.type === "text" ? "Workflow Ollama" : "Workflow RunningHub"} className="studio-action-select studio-workflow-select" onChange={(event) => onUpdateStudioAction(action.id, { presetId: event.target.value || undefined })} value={action.presetId ?? ""}>
+                <option value="">□</option>
+                {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.displayId}</option>)}
+              </select>
+              {action.type === "image" ? <select aria-label="Количество генераций на изображение" className="studio-action-select" onChange={(event) => onChangeImageGenerationsPerMedia(Number(event.target.value))} value={imageGenerationsPerMedia}>{Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count}</option>)}</select> : null}
+              <button className="studio-action-remove" onClick={() => onRemoveStudioAction(action.id)} type="button">−</button>
+            </div>;
+          })}
+        </div>
+        <button onClick={onCancelGeneration} type="button">Отмена</button>
+        <div className="studio-action-add">
+          <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("text")} type="button">＋ Текст</button>
+          <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("image")} type="button">＋ Изображение</button>
+        </div>
+      </aside>
+    </div>
   );
 }
 

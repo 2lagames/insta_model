@@ -5,13 +5,14 @@ import type { ImportAsset, ImportItem } from "../src/lib/importTypes";
 import { validateInstagramUrl } from "../src/lib/instagramUrl";
 import { normalizeRunningHubBindings, validateRunningHubBindings } from "../src/lib/studioBindings";
 import { ActivityLog } from "./activityLog";
-import { ConnectionsStore, type ConnectionKeyName } from "./connectionsStore";
+import { ConnectionsStore, getRunningHubWorkflows, type ConnectionKeyName } from "./connectionsStore";
 import { type PromptMediaInput } from "./ideogramPrompt";
 import { ImportStore, normalizeCurrentSession } from "./importStore";
 import { importInstagramUrl } from "./instagramImporter";
 import { resolveImportMetadataPath } from "./localMetadata";
 import { generateOllamaPrompt, listOllamaModels } from "./ollamaClient";
-import { getActiveOllamaConfiguration } from "./ollamaConfiguration";
+import { getOllamaConfigurationForPreset } from "./ollamaConfiguration";
+import type { OllamaPreset, RunningHubWorkflowPreset, StudioActionButton } from "../src/lib/generationPresets";
 import { GenerationCancelledError, GenerationController, type GenerationOperation } from "./generationController";
 import { cancelRunningHubTask, runRunningHubImageGeneration } from "./runningHub";
 
@@ -53,7 +54,7 @@ app.get("/api/health", (_request, response) => {
   response.json({
     ok: true,
     importProvider: "apify",
-    version: "0.1.0"
+    version: "0.8.0"
   });
 });
 
@@ -122,7 +123,10 @@ app.put("/api/connections", async (request, response) => {
       generationPrefixOptions: optionalString(request.body?.generationPrefixOptions),
       generationPrefixSelection: optionalString(request.body?.generationPrefixSelection),
       runningHubWorkflowId: optionalString(request.body?.runningHubWorkflowId),
-      runningHubBindings: parseRunningHubBindings(request.body?.runningHubBindings)
+      runningHubBindings: parseRunningHubBindings(request.body?.runningHubBindings),
+      runningHubWorkflows: parsePresetArray<RunningHubWorkflowPreset>(request.body?.runningHubWorkflows),
+      ollamaPresets: parsePresetArray<OllamaPreset>(request.body?.ollamaPresets),
+      studioActionButtons: parsePresetArray<StudioActionButton>(request.body?.studioActionButtons)
     });
     response.json(await connectionsStore.readPublic());
   } catch (error) {
@@ -265,7 +269,7 @@ app.post("/api/generation/image-prompts", async (request, response) => {
     const media = parsePromptMedia(request.body?.media);
     generation = generationController.start();
     const connections = await connectionsStore.readPrivate();
-    const ollama = getActiveOllamaConfiguration(connections);
+    const ollama = getOllamaConfigurationForPreset(connections, requiredString(request.body?.ollamaPresetId, "Select an Ollama workflow before prompt generation."));
     activityLog.publish({
       tone: "running",
       source: "prompt",
@@ -331,6 +335,8 @@ app.post("/api/generation/images", async (request, response) => {
     const activeGeneration = generationController.start();
     generation = activeGeneration;
     const connections = await connectionsStore.readPrivate();
+    const workflow = getRunningHubWorkflows(connections).find((item) => item.id === requiredString(request.body?.runningHubWorkflowPresetId, "Select a RunningHub workflow before image generation."));
+    if (!workflow) throw new Error("Select an available RunningHub workflow before image generation.");
     const currentSession = await store.readCurrentSession();
     activityLog.publish({
       tone: "running",
@@ -342,12 +348,8 @@ app.post("/api/generation/images", async (request, response) => {
       outputDir,
       config: {
         apiKey: connections.runningHubApiKey ?? "",
-        workflowId: connections.runningHubWorkflowId ?? "",
-        bindings: normalizeRunningHubBindings(connections.runningHubBindings),
-        promptNodeId: connections.runningHubPromptNodeId,
-        promptFieldName: connections.runningHubPromptFieldName,
-        imageNodeId: connections.runningHubImageNodeId,
-        imageFieldName: connections.runningHubImageFieldName
+        workflowId: workflow.workflowId,
+        bindings: workflow.bindings
       },
       jobs: jobs.map((job) => ({
         mediaId: job.media.id,
@@ -445,6 +447,15 @@ function isGenerationCancelled(error: unknown, generation: { signal: AbortSignal
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function requiredString(value: unknown, message: string): string {
+  if (typeof value !== "string" || !value.trim()) throw new Error(message);
+  return value.trim();
+}
+
+function parsePresetArray<T>(value: unknown): T[] | undefined {
+  return Array.isArray(value) ? value as T[] : undefined;
 }
 
 function parseRunningHubBindings(value: unknown) {
