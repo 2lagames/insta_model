@@ -1129,8 +1129,8 @@ function GenerationWorkspace({
             return <div className={`studio-action-button studio-action-${action.type}`} draggable={true} key={action.id} onDragEnd={() => onDragStudioAction(null)} onDragOver={(event) => event.preventDefault()} onDragStart={() => onDragStudioAction(action.id)} onDrop={() => onDropStudioAction(action.id)}>
               <button disabled={isSessionMutationBusy || selectedForGenerationCount === 0 || !ready} onClick={() => action.presetId && (action.type === "text" ? onGenerateImagePrompts(action.presetId) : onGenerateImages(action.presetId))} type="button">{action.type === "text" ? (isGeneratingPrompt ? "Generating" : `Generate prompt (${selectedForGenerationCount})`) : (isGeneratingImages ? "Generating" : `Image generation (${imageGenerationCount})`)}</button>
               <select aria-label={action.type === "text" ? "Workflow Ollama" : "Workflow RunningHub"} className="studio-action-select studio-workflow-select" onChange={(event) => onUpdateStudioAction(action.id, { presetId: event.target.value || undefined })} value={action.presetId ?? ""}>
-                <option value="">Выбрать</option>
-                {presets.map((preset) => <option key={preset.id} value={preset.id}>{getWorkflowSelectionLabel(action.type, preset.displayId)}</option>)}
+                <option value="">□</option>
+                {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.displayId}</option>)}
               </select>
               {action.type === "image" ? <select aria-label="Количество генераций на изображение" className="studio-action-select" onChange={(event) => onChangeImageGenerationsPerMedia(Number(event.target.value))} value={imageGenerationsPerMedia}>{Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count}</option>)}</select> : null}
               <button className="studio-action-remove" onClick={() => onRemoveStudioAction(action.id)} type="button">−</button>
@@ -1141,10 +1141,6 @@ function GenerationWorkspace({
       </aside>
     </div>
   );
-}
-
-function getWorkflowSelectionLabel(type: StudioActionType, displayId: string): string {
-  return type === "text" ? `Ollama ${displayId}` : `RunningHub ${displayId}`;
 }
 
 function MediaSelector({

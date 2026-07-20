@@ -333,12 +333,12 @@ input {
 }
 
 .studio-action-add { grid-template-columns: 1fr 1fr; }
-.studio-action-button { grid-template-columns: minmax(0, 1fr) 136px 42px 32px; align-items: center; cursor: grab; }
-.studio-action-text { grid-template-columns: minmax(0, 1fr) 136px 32px; }
+.studio-action-button { grid-template-columns: minmax(0, 1fr) 84px 42px 32px; align-items: center; cursor: grab; }
+.studio-action-text { grid-template-columns: minmax(0, 1fr) 84px 32px; }
 .studio-action-select,
 .studio-action-remove { height: 42px; min-width: 0; border: 1px solid #2c2a26; border-radius: 8px; background: #fffdf8; }
 .studio-action-select { padding: 0; text-align: center; }
-.studio-workflow-select { padding: 0 8px; text-align: left; }
+.studio-workflow-select { padding: 0 4px; text-align: center; }
 .studio-action-remove { cursor: pointer; }
 
 .generation-panel button:disabled {

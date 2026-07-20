@@ -331,13 +331,12 @@ describe("studio preview layout", () => {
     expect(cssSource).toContain("grid-auto-rows: minmax(42px, auto);");
   });
 
-  it("uses a readable workflow selector for added generation actions", () => {
+  it("keeps workflow selectors compact without clipping their selected IDs", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const cssSource = readFileSync("src/App.css", "utf8");
 
-    expect(appSource).toContain("getWorkflowSelectionLabel(action.type, preset.displayId)");
-    expect(appSource).toContain("Ollama ${displayId}");
-    expect(appSource).toContain("RunningHub ${displayId}");
-    expect(cssSource).toContain("grid-template-columns: minmax(0, 1fr) 136px 42px 32px;");
+    expect(appSource).toContain("<option value=\"\">□</option>");
+    expect(appSource).toContain("<option key={preset.id} value={preset.id}>{preset.displayId}</option>");
+    expect(cssSource).toContain("grid-template-columns: minmax(0, 1fr) 84px 42px 32px;");
   });
 });
