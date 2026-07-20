@@ -571,7 +571,7 @@ input {
 }
 
 .ollama-card {
-  grid-template-columns: minmax(560px, 0.95fr) minmax(420px, 1.05fr);
+  grid-template-columns: 1fr;
   align-items: start;
 }
 
@@ -619,6 +619,41 @@ input {
 
 .preset-card-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .preset-card-header h3 { margin: 0; }
+
+.ollama-preset-layout {
+  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
+  align-items: stretch;
+  gap: 14px;
+}
+
+.ollama-preset-layout > .preset-card-header {
+  grid-column: 1 / -1;
+}
+
+.ollama-preset-settings {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.ollama-preset-instruction {
+  grid-column: 2;
+  min-height: 100%;
+}
+
+.ollama-preset-instruction textarea {
+  min-height: 184px;
+  height: 100%;
+}
+
+.preset-add-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.preset-add-button {
+  min-width: max-content;
+}
 
 .runninghub-bindings {
   display: grid;
@@ -874,6 +909,15 @@ input {
 
   .generation-panel {
     grid-template-columns: 1fr;
+  }
+
+  .ollama-preset-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .ollama-preset-layout > .preset-card-header,
+  .ollama-preset-instruction {
+    grid-column: auto;
   }
 
   .generated-media-column .media-list {

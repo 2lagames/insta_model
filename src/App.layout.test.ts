@@ -304,4 +304,16 @@ describe("studio preview layout", () => {
     expect(savePrompt).toContain("setIsSavingPrompt(true);");
     expect(savePrompt).toContain("setIsSavingPrompt(false);");
   });
+
+  it("lays out Ollama presets across the Settings card and places add actions at the bottom", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const cssSource = readFileSync("src/App.css", "utf8");
+
+    expect(appSource).toContain("ollama-preset-layout");
+    expect(appSource).toContain("preset-add-button");
+    expect(appSource).toContain("preset-add-row");
+    expect(cssSource).toContain(".ollama-preset-layout {");
+    expect(cssSource).toContain("grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);");
+    expect(cssSource).toContain(".preset-add-row {");
+  });
 });
