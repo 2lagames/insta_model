@@ -621,7 +621,7 @@ input {
 .preset-card-header h3 { margin: 0; }
 
 .ollama-preset-layout {
-  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(240px, 0.7fr) minmax(0, 1.3fr);
   align-items: stretch;
   gap: 14px;
 }

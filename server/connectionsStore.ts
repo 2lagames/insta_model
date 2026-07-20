@@ -1,6 +1,6 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { legacyRunningHubBindings, normalizeRunningHubBindings, type RunningHubBinding } from "../src/lib/studioBindings";
+import { isStudioId, legacyRunningHubBindings, normalizeRunningHubBindings, type RunningHubBinding } from "../src/lib/studioBindings";
 import type { OllamaPreset, RunningHubWorkflowPreset, StudioActionButton } from "../src/lib/generationPresets";
 
 export type PrivateConnections = {
@@ -204,7 +204,21 @@ export function getOllamaPresets(connections: PrivateConnections): OllamaPreset[
 }
 
 function normalizeRunningHubWorkflows(items: RunningHubWorkflowPreset[]): RunningHubWorkflowPreset[] {
-  return items.flatMap((item) => typeof item?.id === "string" && typeof item.displayId === "string" ? [{ id: item.id.trim(), displayId: item.displayId.trim(), workflowId: typeof item.workflowId === "string" ? item.workflowId.trim() : "", bindings: normalizeRunningHubBindings(item.bindings) }] : []);
+  return items.flatMap((item) => typeof item?.id === "string" && typeof item.displayId === "string" ? [{ id: item.id.trim(), displayId: item.displayId.trim(), workflowId: typeof item.workflowId === "string" ? item.workflowId.trim() : "", bindings: normalizeRunningHubWorkflowBindings(item.bindings) }] : []);
+}
+
+function normalizeRunningHubWorkflowBindings(value: unknown): RunningHubBinding[] {
+  const bindings = Array.isArray(value) ? value.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object") return [];
+    const record = candidate as Record<string, unknown>;
+    return [{
+      nodeId: typeof record.nodeId === "string" ? record.nodeId.trim() : "",
+      fieldName: typeof record.fieldName === "string" ? record.fieldName.trim() : "",
+      studioId: isStudioId(record.studioId) ? record.studioId : "1"
+    }];
+  }) : [];
+
+  return bindings.length > 0 ? bindings : [{ nodeId: "", fieldName: "", studioId: "1" }];
 }
 
 function normalizeOllamaPresets(items: OllamaPreset[]): OllamaPreset[] {

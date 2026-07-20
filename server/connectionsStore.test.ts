@@ -259,4 +259,18 @@ describe("ConnectionsStore", () => {
       studioActionButtons: [{ id: "text-action", presetId: "ol-1" }]
     });
   });
+
+  it("restores an editable binding row for a workflow saved without bindings", async () => {
+    const store = new ConnectionsStore(tempDir);
+    await store.save({
+      runningHubWorkflows: [{ id: "rh-1", displayId: "RH01", workflowId: "workflow-1", bindings: [] }]
+    } as Parameters<ConnectionsStore["save"]>[0]);
+
+    await expect(store.readPublic()).resolves.toMatchObject({
+      runningHubWorkflows: [{
+        id: "rh-1",
+        bindings: [{ nodeId: "", fieldName: "", studioId: "1" }]
+      }]
+    });
+  });
 });
