@@ -314,6 +314,7 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("preset-add-row");
     expect(cssSource).toContain(".ollama-preset-layout {");
     expect(cssSource).toContain("grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);");
+    expect(cssSource).toContain(".ollama-preset-layout .ollama-preset-instruction {");
     expect(cssSource).toContain(".preset-add-row {");
   });
 });
