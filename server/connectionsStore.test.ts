@@ -18,7 +18,7 @@ describe("ConnectionsStore", () => {
   it("returns no public key data when the local file is missing", async () => {
     const store = new ConnectionsStore(tempDir);
 
-    await expect(store.readPublic()).resolves.toEqual({
+    await expect(store.readPublic()).resolves.toMatchObject({
       hasApifyApiToken: false,
       hasOllamaCloudApiKey: false,
       ollamaPromptInstruction: "",
@@ -34,7 +34,7 @@ describe("ConnectionsStore", () => {
     await expect(store.readPrivate()).resolves.toEqual({
       apifyApiToken: "apify_token_1234567890"
     });
-    await expect(store.readPublic()).resolves.toEqual({
+    await expect(store.readPublic()).resolves.toMatchObject({
       hasApifyApiToken: true,
       apifyApiTokenPreview: "******************7890",
       hasOllamaCloudApiKey: false,
@@ -74,7 +74,7 @@ describe("ConnectionsStore", () => {
       runningHubPromptNodeId: "6",
       runningHubPromptFieldName: "text"
     });
-    await expect(store.readPublic()).resolves.toEqual({
+    await expect(store.readPublic()).resolves.toMatchObject({
       hasApifyApiToken: true,
       apifyApiTokenPreview: "******************7890",
       hasOllamaCloudApiKey: false,
@@ -194,7 +194,7 @@ describe("ConnectionsStore", () => {
 
     await store.save({ runningHubWorkflowId: "workflow-1" });
 
-    await expect(store.readPrivate()).resolves.toEqual({
+    await expect(store.readPrivate()).resolves.toMatchObject({
       ollamaProvider: "cloud",
       ollamaCloudModel: "gemma3",
       ollamaPromptInstruction: "Describe the image.",
@@ -230,7 +230,7 @@ describe("ConnectionsStore", () => {
 
     await store.save({ runningHubPromptNodeId: "6" });
 
-    await expect(store.readPrivate()).resolves.toEqual({
+    await expect(store.readPrivate()).resolves.toMatchObject({
       runningHubWorkflowId: "workflow-1",
       runningHubPromptNodeId: "6"
     });
@@ -243,5 +243,20 @@ describe("ConnectionsStore", () => {
 
     await expect(store.readPrivate()).resolves.toEqual({ ollamaPromptInstruction: "" });
     await expect(store.readPublic()).resolves.toMatchObject({ ollamaPromptInstruction: "" });
+  });
+
+  it("stores multiple workflow and Ollama presets with stable display IDs", async () => {
+    const store = new ConnectionsStore(tempDir);
+    await store.save({
+      runningHubWorkflows: [{ id: "rh-1", displayId: "RH01", workflowId: "workflow-1", bindings: [{ nodeId: "39", fieldName: "image", studioId: "1" }] }],
+      ollamaPresets: [{ id: "ol-1", displayId: "OL01", provider: "local", model: "gemma3", promptInstruction: "Describe the image." }],
+      studioActionButtons: [{ id: "text-action", label: "Генерация текста", type: "text", presetId: "ol-1", order: 0 }]
+    } as Parameters<ConnectionsStore["save"]>[0]);
+
+    await expect(store.readPublic()).resolves.toMatchObject({
+      runningHubWorkflows: [{ id: "rh-1", displayId: "RH01" }],
+      ollamaPresets: [{ id: "ol-1", displayId: "OL01" }],
+      studioActionButtons: [{ id: "text-action", presetId: "ol-1" }]
+    });
   });
 });

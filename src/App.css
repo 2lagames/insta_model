@@ -323,6 +323,23 @@ input {
 .generation-prefix-control button { padding: 0; cursor: pointer; font-size: 20px; }
 .image-generation-control select { padding: 0; text-align: center; }
 
+.studio-action-add,
+.studio-action-list,
+.studio-action-button,
+.preset-card-list,
+.preset-card {
+  display: grid;
+  gap: 8px;
+}
+
+.studio-action-add { grid-template-columns: 1fr 1fr; }
+.studio-action-button { grid-template-columns: minmax(0, 1fr) 42px 42px 32px; align-items: center; cursor: grab; }
+.studio-action-text { grid-template-columns: minmax(0, 1fr) 42px 32px; }
+.studio-action-select,
+.studio-action-remove { height: 42px; min-width: 0; border: 1px solid #2c2a26; border-radius: 8px; background: #fffdf8; }
+.studio-action-select { padding: 0; text-align: center; }
+.studio-action-remove { cursor: pointer; }
+
 .generation-panel button:disabled {
   color: #8d857a;
   border-color: #d6d0c4;
@@ -592,6 +609,16 @@ input {
   grid-column: 1 / -1;
   max-width: 420px;
 }
+
+.preset-card {
+  border: 1px solid #ded8ce;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fffdf8;
+}
+
+.preset-card-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.preset-card-header h3 { margin: 0; }
 
 .runninghub-bindings {
   display: grid;

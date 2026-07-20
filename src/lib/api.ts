@@ -1,6 +1,7 @@
 import type { CurrentMediaSession, ImportItem } from "./importTypes";
 import type { PromptMediaInput } from "./promptTypes";
 import type { RunningHubBinding } from "./studioBindings";
+import type { OllamaPreset, RunningHubWorkflowPreset, StudioActionButton } from "./generationPresets";
 
 type ImportsResponse = {
   items: ImportItem[];
@@ -91,6 +92,9 @@ export type ConnectionSaveInput = {
   generationPrefixSelection?: string;
   runningHubWorkflowId?: string;
   runningHubBindings?: RunningHubBinding[];
+  runningHubWorkflows?: RunningHubWorkflowPreset[];
+  ollamaPresets?: OllamaPreset[];
+  studioActionButtons?: StudioActionButton[];
 };
 
 export type HealthResponse = {
@@ -114,6 +118,9 @@ export type PublicConnections = {
   runningHubApiKeyPreview?: string;
   runningHubWorkflowId?: string;
   runningHubBindings?: RunningHubBinding[];
+  runningHubWorkflows: RunningHubWorkflowPreset[];
+  ollamaPresets: OllamaPreset[];
+  studioActionButtons: StudioActionButton[];
 };
 
 export async function listImports(): Promise<ImportsSessionResponse> {
@@ -258,13 +265,13 @@ export async function generateImagePrompts(media: PromptMediaInput[]): Promise<P
   return await generateImagePromptsWithOptions(media);
 }
 
-export async function generateImagePromptsWithOptions(media: PromptMediaInput[], options: { signal?: AbortSignal } = {}): Promise<PromptGenerationResult> {
+export async function generateImagePromptsWithOptions(media: PromptMediaInput[], options: { ollamaPresetId?: string; signal?: AbortSignal } = {}): Promise<PromptGenerationResult> {
   const response = await apiFetch("/api/generation/image-prompts", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ media }),
+    body: JSON.stringify({ media, ...(options.ollamaPresetId ? { ollamaPresetId: options.ollamaPresetId } : {}) }),
     ...(options.signal ? { signal: options.signal } : {})
   });
   await assertOk(response);
@@ -279,7 +286,7 @@ export async function generateImages(jobs: ImageGenerationJobInput[]): Promise<I
   return await generateImagesWithOptions(jobs);
 }
 
-export async function generateImagesWithOptions(jobs: ImageGenerationJobInput[], options: { signal?: AbortSignal; batchPosition?: number; batchTotal?: number } = {}): Promise<ImageGenerationResult> {
+export async function generateImagesWithOptions(jobs: ImageGenerationJobInput[], options: { runningHubWorkflowPresetId?: string; signal?: AbortSignal; batchPosition?: number; batchTotal?: number } = {}): Promise<ImageGenerationResult> {
   const response = await apiFetch("/api/generation/images", {
     method: "POST",
     headers: {
@@ -287,6 +294,7 @@ export async function generateImagesWithOptions(jobs: ImageGenerationJobInput[],
     },
     body: JSON.stringify({
       jobs,
+      ...(options.runningHubWorkflowPresetId ? { runningHubWorkflowPresetId: options.runningHubWorkflowPresetId } : {}),
       ...(options.batchPosition !== undefined ? { batchPosition: options.batchPosition } : {}),
       ...(options.batchTotal !== undefined ? { batchTotal: options.batchTotal } : {})
     }),
