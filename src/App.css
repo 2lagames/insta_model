@@ -286,7 +286,7 @@ input {
   display: grid;
   grid-template-columns: 1fr;
   gap: 8px;
-  grid-auto-rows: 42px;
+  grid-auto-rows: minmax(42px, auto);
   align-content: start;
   padding: 14px;
 }

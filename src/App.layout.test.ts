@@ -61,7 +61,7 @@ describe("studio preview layout", () => {
 
     expect(appSource).toContain('className="media-column generated-media-column"');
     expect(cssSource).toContain(".generated-media-column .media-selector {");
-    expect(cssSource).toContain("grid-auto-rows: 42px");
+    expect(cssSource).toContain("grid-auto-rows: minmax(42px, auto);");
     expect(cssSource).not.toContain("--studio-stage-height");
     expect(cssSource).toContain("overflow-y: auto");
   });
@@ -317,5 +317,17 @@ describe("studio preview layout", () => {
     expect(cssSource).toContain(".ollama-preset-layout .ollama-preset-instruction {");
     expect(cssSource).toContain(".preset-add-row {");
     expect(appSource).toContain("getEditableRunningHubBindings(workflow.bindings)");
+  });
+
+  it("shows only explicitly added generation actions and lets their list grow", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const cssSource = readFileSync("src/App.css", "utf8");
+    const generationWorkspaceStart = appSource.indexOf("function GenerationWorkspace({");
+    const generationWorkspace = appSource.slice(generationWorkspaceStart, appSource.indexOf("function MediaSelector", generationWorkspaceStart));
+
+    expect(generationWorkspace).not.toContain("Video generation");
+    expect(generationWorkspace).not.toContain("Trend analysis");
+    expect(generationWorkspace).not.toContain("Caption and hashtags");
+    expect(cssSource).toContain("grid-auto-rows: minmax(42px, auto);");
   });
 });
