@@ -1108,13 +1108,43 @@ function GenerationWorkspace({
   const imageGenerationCount = selectedForGenerationCount * imageGenerationsPerMedia;
 
   return (
-    <div className="generation-column"><div className="panel-label">Generation workspace</div><aside className="generation-panel">
-      <div className="generation-prefix-control"><select onChange={(event) => onChangePrefix(event.target.value)} value={generationPrefixSelection}><option value="">Не выбрано</option>{parseGenerationPrefixes(generationPrefixOptions).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select><button aria-label="Редактировать варианты промта" onClick={onEditPrefixes} type="button">✎</button></div>
-      <div className="studio-action-add"><button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("text")} type="button">＋ Текст</button><button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("image")} type="button">＋ Изображение</button></div>
-      <div className="studio-action-list">{studioActionButtons.map((action) => { const presets = action.type === "text" ? ollamaPresets : runningHubWorkflows; const ready = Boolean(action.presetId && presets.some((preset) => preset.id === action.presetId)); return <div className={`studio-action-button studio-action-${action.type}`} draggable={true} key={action.id} onDragEnd={() => onDragStudioAction(null)} onDragOver={(event) => event.preventDefault()} onDragStart={() => onDragStudioAction(action.id)} onDrop={() => onDropStudioAction(action.id)}><button disabled={isSessionMutationBusy || selectedForGenerationCount === 0 || !ready} onClick={() => action.presetId && (action.type === "text" ? onGenerateImagePrompts(action.presetId) : onGenerateImages(action.presetId))} type="button">{action.type === "text" ? (isGeneratingPrompt ? "Generating" : `Generate prompt (${selectedForGenerationCount})`) : (isGeneratingImages ? "Generating" : `Image generation (${imageGenerationCount})`)}</button><select aria-label={action.type === "text" ? "Workflow Ollama" : "Workflow RunningHub"} className="studio-action-select" onChange={(event) => onUpdateStudioAction(action.id, { presetId: event.target.value || undefined })} value={action.presetId ?? ""}><option value="">□</option>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.displayId}</option>)}</select>{action.type === "image" ? <select aria-label="Количество генераций на изображение" className="studio-action-select" onChange={(event) => onChangeImageGenerationsPerMedia(Number(event.target.value))} value={imageGenerationsPerMedia}>{Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count}</option>)}</select> : null}<button className="studio-action-remove" onClick={() => onRemoveStudioAction(action.id)} type="button">−</button></div>; })}</div>
-      <button onClick={onCancelGeneration} type="button">Отмена</button>
-    </aside></div>
+    <div className="generation-column">
+      <div className="panel-label">Generation workspace</div>
+      <aside className="generation-panel">
+        <div className="generation-prefix-control">
+          <select onChange={(event) => onChangePrefix(event.target.value)} value={generationPrefixSelection}>
+            <option value="">Не выбрано</option>
+            {parseGenerationPrefixes(generationPrefixOptions).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
+          </select>
+          <button aria-label="Редактировать варианты промта" onClick={onEditPrefixes} type="button">✎</button>
+        </div>
+        <div className="studio-action-add">
+          <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("text")} type="button">＋ Текст</button>
+          <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("image")} type="button">＋ Изображение</button>
+        </div>
+        <div className="studio-action-list">
+          {studioActionButtons.map((action) => {
+            const presets = action.type === "text" ? ollamaPresets : runningHubWorkflows;
+            const ready = Boolean(action.presetId && presets.some((preset) => preset.id === action.presetId));
+            return <div className={`studio-action-button studio-action-${action.type}`} draggable={true} key={action.id} onDragEnd={() => onDragStudioAction(null)} onDragOver={(event) => event.preventDefault()} onDragStart={() => onDragStudioAction(action.id)} onDrop={() => onDropStudioAction(action.id)}>
+              <button disabled={isSessionMutationBusy || selectedForGenerationCount === 0 || !ready} onClick={() => action.presetId && (action.type === "text" ? onGenerateImagePrompts(action.presetId) : onGenerateImages(action.presetId))} type="button">{action.type === "text" ? (isGeneratingPrompt ? "Generating" : `Generate prompt (${selectedForGenerationCount})`) : (isGeneratingImages ? "Generating" : `Image generation (${imageGenerationCount})`)}</button>
+              <select aria-label={action.type === "text" ? "Workflow Ollama" : "Workflow RunningHub"} className="studio-action-select studio-workflow-select" onChange={(event) => onUpdateStudioAction(action.id, { presetId: event.target.value || undefined })} value={action.presetId ?? ""}>
+                <option value="">Выбрать</option>
+                {presets.map((preset) => <option key={preset.id} value={preset.id}>{getWorkflowSelectionLabel(action.type, preset.displayId)}</option>)}
+              </select>
+              {action.type === "image" ? <select aria-label="Количество генераций на изображение" className="studio-action-select" onChange={(event) => onChangeImageGenerationsPerMedia(Number(event.target.value))} value={imageGenerationsPerMedia}>{Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count}</option>)}</select> : null}
+              <button className="studio-action-remove" onClick={() => onRemoveStudioAction(action.id)} type="button">−</button>
+            </div>;
+          })}
+        </div>
+        <button onClick={onCancelGeneration} type="button">Отмена</button>
+      </aside>
+    </div>
   );
+}
+
+function getWorkflowSelectionLabel(type: StudioActionType, displayId: string): string {
+  return type === "text" ? `Ollama ${displayId}` : `RunningHub ${displayId}`;
 }
 
 function MediaSelector({

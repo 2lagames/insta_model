@@ -330,4 +330,14 @@ describe("studio preview layout", () => {
     expect(generationWorkspace).not.toContain("Caption and hashtags");
     expect(cssSource).toContain("grid-auto-rows: minmax(42px, auto);");
   });
+
+  it("uses a readable workflow selector for added generation actions", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const cssSource = readFileSync("src/App.css", "utf8");
+
+    expect(appSource).toContain("getWorkflowSelectionLabel(action.type, preset.displayId)");
+    expect(appSource).toContain("Ollama ${displayId}");
+    expect(appSource).toContain("RunningHub ${displayId}");
+    expect(cssSource).toContain("grid-template-columns: minmax(0, 1fr) 136px 42px 32px;");
+  });
 });
