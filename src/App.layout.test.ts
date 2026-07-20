@@ -313,8 +313,9 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("preset-add-button");
     expect(appSource).toContain("preset-add-row");
     expect(cssSource).toContain(".ollama-preset-layout {");
-    expect(cssSource).toContain("grid-template-columns: minmax(240px, 0.7fr) minmax(0, 1.3fr);");
+    expect(cssSource).toContain("grid-template-columns: minmax(220px, 0.2fr) minmax(0, 0.8fr);");
     expect(cssSource).toContain(".ollama-preset-layout .ollama-preset-instruction {");
     expect(cssSource).toContain(".preset-add-row {");
+    expect(appSource).toContain("getEditableRunningHubBindings(workflow.bindings)");
   });
 });
