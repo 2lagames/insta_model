@@ -54,7 +54,7 @@ app.get("/api/health", (_request, response) => {
   response.json({
     ok: true,
     importProvider: "apify",
-    version: "0.1.0"
+    version: "0.8.0"
   });
 });
 
