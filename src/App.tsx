@@ -1118,10 +1118,6 @@ function GenerationWorkspace({
           </select>
           <button aria-label="Редактировать варианты промта" onClick={onEditPrefixes} type="button">✎</button>
         </div>
-        <div className="studio-action-add">
-          <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("text")} type="button">＋ Текст</button>
-          <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("image")} type="button">＋ Изображение</button>
-        </div>
         <div className="studio-action-list">
           {studioActionButtons.map((action) => {
             const presets = action.type === "text" ? ollamaPresets : runningHubWorkflows;
@@ -1138,6 +1134,10 @@ function GenerationWorkspace({
           })}
         </div>
         <button onClick={onCancelGeneration} type="button">Отмена</button>
+        <div className="studio-action-add">
+          <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("text")} type="button">＋ Текст</button>
+          <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("image")} type="button">＋ Изображение</button>
+        </div>
       </aside>
     </div>
   );

@@ -331,6 +331,14 @@ describe("studio preview layout", () => {
     expect(cssSource).toContain("grid-auto-rows: minmax(42px, auto);");
   });
 
+  it("places generation action add controls below cancellation", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const generationWorkspaceStart = appSource.indexOf("function GenerationWorkspace({");
+    const generationWorkspace = appSource.slice(generationWorkspaceStart, appSource.indexOf("function MediaSelector", generationWorkspaceStart));
+
+    expect(generationWorkspace.indexOf("onClick={onCancelGeneration}")).toBeLessThan(generationWorkspace.indexOf('className="studio-action-add"'));
+  });
+
   it("keeps workflow selectors compact without clipping their selected IDs", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const cssSource = readFileSync("src/App.css", "utf8");
