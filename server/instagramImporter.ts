@@ -325,7 +325,7 @@ function inferExtension(url: string, mediaType: "image" | "video"): string {
   return mediaType === "video" ? ".mp4" : ".jpg";
 }
 
-async function generateFirstFrameWithFfmpeg(videoPath: string, firstFramePath: string): Promise<void> {
+export async function generateFirstFrameWithFfmpeg(videoPath: string, firstFramePath: string): Promise<void> {
   if (!ffmpegPath) {
     throw new Error("ffmpeg-static did not provide an ffmpeg binary for this platform.");
   }

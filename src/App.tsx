@@ -4,6 +4,7 @@ import {
   clearConnectionKey,
   generateImagePromptsWithOptions,
   generateImagesWithOptions,
+  generateVideosWithOptions,
   getConnections,
   getHealth,
   importInstagramUrl,
@@ -86,6 +87,7 @@ export default function App() {
   const [isSavingPrompt, setIsSavingPrompt] = useState(false);
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
+  const [isGeneratingVideos, setIsGeneratingVideos] = useState(false);
   const [isBackendCurrent, setIsBackendCurrent] = useState(true);
   const [selectedForGeneration, setSelectedForGeneration] = useState<string[]>([]);
   const [imageGenerationsPerMedia, setImageGenerationsPerMedia] = useState(1);
@@ -114,10 +116,11 @@ export default function App() {
   const [promptDocuments, setPromptDocuments] = useState<PromptDocument[]>([]);
   const promptAutosaveRevisionRef = useRef(0);
   const isPromptAutosaveReadyRef = useRef(false);
-  const localImageInputRef = useRef<HTMLInputElement | null>(null);
+  const localMediaInputRef = useRef<HTMLInputElement | null>(null);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const isSessionMutationBusyRef = useRef(false);
   const generationAbortControllerRef = useRef<AbortController | null>(null);
-  const isSessionMutationBusy = isImporting || isResetting || isSavingPrompt || isGeneratingPrompt || isGeneratingImages;
+  const isSessionMutationBusy = isImporting || isResetting || isSavingPrompt || isGeneratingPrompt || isGeneratingImages || isGeneratingVideos;
 
   function tryBeginSessionMutation() {
     if (isSessionMutationBusyRef.current) {
@@ -354,7 +357,7 @@ export default function App() {
     }
   }
 
-  async function handleLocalImageUpload(files: FileList | null) {
+  async function handleLocalMediaUpload(files: FileList | null) {
     if (!files?.length || !tryBeginSessionMutation()) return;
 
     promptAutosaveRevisionRef.current += 1;
@@ -380,16 +383,64 @@ export default function App() {
         setSelectedForGeneration(firstImportedMedia[0]?.id ? [firstImportedMedia[0].id] : []);
         setPromptDocuments([]);
         setUrl("");
-        setUrlNotice("Локальное изображение — ссылка Instagram отсутствует");
+        setUrlNotice("Локальное медиа — ссылка Instagram отсутствует");
       }
 
-      recordStatus({ tone: "ready", message: "Local image uploaded." });
+      recordStatus({ tone: "ready", message: "Local media uploaded." });
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
     } finally {
-      if (localImageInputRef.current) {
-        localImageInputRef.current.value = "";
+      if (localMediaInputRef.current) {
+        localMediaInputRef.current.value = "";
       }
+      setIsImporting(false);
+      endSessionMutation();
+    }
+  }
+
+  async function handleCaptureVideoScreenshot() {
+    const video = previewVideoRef.current;
+    const width = video?.videoWidth ?? 0;
+    const height = video?.videoHeight ?? 0;
+    if (!video || width === 0 || height === 0) {
+      recordStatus({ tone: "error", message: "Pause a loaded video frame before taking a screenshot." });
+      return;
+    }
+    if (!tryBeginSessionMutation()) {
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        throw new Error("Could not prepare a screenshot canvas.");
+      }
+      context.drawImage(video, 0, 0, width, height);
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) {
+        throw new Error("Could not encode the screenshot as PNG.");
+      }
+
+      const file = new File([blob], `video-screenshot-${Date.now()}.png`, { type: "image/png" });
+      const imported = await uploadLocalImage(file, { appendToSession: true });
+      const screenshotMaterials = createMediaMaterials(imported.item);
+      const screenshot = screenshotMaterials[0];
+      isPromptAutosaveReadyRef.current = true;
+      setCurrentSession(imported.session);
+      setItems((current) => [imported.item, ...current.filter((item) => item.id !== imported.item.id)]);
+      setSelectedItemId(imported.item.id);
+      setSessionMediaItemIds(imported.session.itemIds);
+      setIsMediaSessionReset(false);
+      setSelectedMediaId(screenshot?.id ?? null);
+      setSelectedForGeneration(screenshot?.id ? [screenshot.id] : []);
+      recordStatus({ tone: "ready", message: "Video screenshot saved to Media." });
+    } catch (error) {
+      recordStatus({ tone: "error", message: toErrorMessage(error) });
+    } finally {
       setIsImporting(false);
       endSessionMutation();
     }
@@ -433,11 +484,9 @@ export default function App() {
 
   async function createSelectedPrompts(ollamaPresetId: string, signal?: AbortSignal): Promise<Array<{ mediaId: string; label: string; prompt: string }>> {
     const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
-    const documentsByMediaId = new Map(promptDocuments.map((document) => [document.mediaId, document]));
-    const missingPromptMedia = selectedPromptMedia.filter((media) => !documentsByMediaId.has(media.id));
     let generatedPrompts: Array<{ mediaId: string; label: string; prompt: string }> = [];
     const prefix = parseGenerationPrefixes(generationPrefixOptions).find((item) => item.name === generationPrefixSelection)?.text;
-    for (const media of missingPromptMedia) {
+    for (const media of selectedPromptMedia) {
       const generated = await generateImagePromptsWithOptions([media], { ollamaPresetId, signal });
       const generatedPrompt = generated.prompts[0];
       if (!generatedPrompt) {
@@ -481,7 +530,8 @@ export default function App() {
     generationAbortControllerRef.current = abortController;
     recordStatus({ tone: "running", message: "Generating prompts with the selected Ollama model." });
     try {
-      await createSelectedPrompts(ollamaPresetId, abortController.signal);
+      const generatedPrompts = await createSelectedPrompts(ollamaPresetId, abortController.signal);
+      recordStatus({ tone: "ready", message: `Generated ${generatedPrompts.length} prompt(s).` });
     } catch (error) {
       if (!isAbortError(error)) {
         recordStatus({ tone: "error", message: toErrorMessage(error) });
@@ -589,11 +639,62 @@ export default function App() {
     }
   }
 
+  async function handleGenerateVideos(runningHubWorkflowPresetId: string) {
+    const sourceVideos = sourceMaterials.filter((media) => selectedForGeneration.includes(media.id) && media.mediaType === "video");
+    const selectedGeneratedImages = generatedMaterials.filter((media) => selectedForGeneration.includes(media.id) && media.mediaType === "image");
+    if (sourceVideos.length !== 1 || selectedGeneratedImages.length !== 1) {
+      recordStatus({ tone: "error", message: "Select exactly one source video and one generated image before video generation." });
+      return;
+    }
+
+    const sourceVideo = createPromptMediaInput(sourceVideos[0], currentSession);
+    const generatedImage = createPromptMediaInput(selectedGeneratedImages[0], currentSession);
+    const prompt = promptDocuments.find((document) => document.mediaId === sourceVideos[0].id);
+    if (!sourceVideo?.videoPath || !generatedImage?.generatedImagePath || !prompt) {
+      recordStatus({ tone: "error", message: "Generate and save a prompt for the selected source video before video generation." });
+      return;
+    }
+
+    if (!tryBeginSessionMutation()) {
+      return;
+    }
+
+    setIsGeneratingVideos(true);
+    const abortController = new AbortController();
+    generationAbortControllerRef.current = abortController;
+    recordStatus({ tone: "running", message: "Sending the selected source video, generated image, and video prompt to RunningHub." });
+    try {
+      const generated = await generateVideosWithOptions({
+        sourceVideo,
+        generatedImage,
+        prompt: getCurrentPrompt(prompt)
+      }, {
+        runningHubWorkflowPresetId,
+        signal: abortController.signal
+      });
+      setItems((current) => [generated.item, ...current.filter((item) => item.id !== generated.item.id)]);
+      setCurrentSession(generated.session);
+      setSessionMediaItemIds(generated.session.itemIds);
+      setIsMediaSessionReset(false);
+    } catch (error) {
+      if (!isAbortError(error)) {
+        recordStatus({ tone: "error", message: toErrorMessage(error) });
+      }
+    } finally {
+      setIsGeneratingVideos(false);
+      if (generationAbortControllerRef.current === abortController) {
+        generationAbortControllerRef.current = null;
+      }
+      endSessionMutation();
+    }
+  }
+
   function handleCancelGeneration() {
     generationAbortControllerRef.current?.abort();
     generationAbortControllerRef.current = null;
     setIsGeneratingPrompt(false);
     setIsGeneratingImages(false);
+    setIsGeneratingVideos(false);
     endSessionMutation();
     recordStatus({ tone: "ready", message: "Generation cancellation requested." });
     void cancelGeneration().catch((error: unknown) => {
@@ -653,7 +754,7 @@ export default function App() {
   }
 
   function addStudioAction(type: StudioActionType) {
-    persistStudioActionButtons([...studioActionButtons, { id: crypto.randomUUID(), label: type === "text" ? "Генерация текста" : "Генерация изображения", type, order: studioActionButtons.length }]);
+    persistStudioActionButtons([...studioActionButtons, { id: crypto.randomUUID(), label: type === "text" ? "Генерация текста" : type === "image" ? "Генерация изображения" : "Генерация видео", type, order: studioActionButtons.length }]);
   }
 
   function updateStudioAction(id: string, update: Partial<StudioActionButton>) {
@@ -817,8 +918,8 @@ export default function App() {
               Обновить заново
             </button>
             <label className="secondary-button upload-image-button">
-              Загрузить изображение
-              <input accept="image/*" disabled={isSessionMutationBusy} multiple onChange={(event) => void handleLocalImageUpload(event.target.files)} ref={localImageInputRef} type="file" />
+              Загрузить медиа
+              <input accept="image/*,video/*" disabled={isSessionMutationBusy} multiple onChange={(event) => void handleLocalMediaUpload(event.target.files)} ref={localMediaInputRef} type="file" />
             </label>
             <button className="secondary-button" onClick={handleOpenFolder} type="button">Open Folder</button>
           </section>
@@ -838,7 +939,9 @@ export default function App() {
                 isSessionMutationBusy={isSessionMutationBusy}
                 isGeneratingPrompt={isGeneratingPrompt}
                 isGeneratingImages={isGeneratingImages}
+                isGeneratingVideos={isGeneratingVideos}
                 onGenerateImages={handleGenerateImages}
+                onGenerateVideos={handleGenerateVideos}
                 onGenerateImagePrompts={handleGenerateImagePrompts}
                 onAddStudioAction={addStudioAction}
                 onUpdateStudioAction={updateStudioAction}
@@ -846,6 +949,8 @@ export default function App() {
                 onDragStudioAction={setDraggedStudioActionId}
                 onDropStudioAction={moveStudioAction}
                 onCancelGeneration={handleCancelGeneration}
+                onCaptureScreenshot={handleCaptureVideoScreenshot}
+                previewVideoRef={previewVideoRef}
                 onSavePrompt={handleSavePrompt}
                 onSelectMaterial={(material) => {
                   setSelectedItemId(material.importItem.id);
@@ -936,7 +1041,9 @@ function Preview({
   isSessionMutationBusy,
   isGeneratingPrompt,
   isGeneratingImages,
+  isGeneratingVideos,
   onGenerateImages,
+  onGenerateVideos,
   onGenerateImagePrompts,
   onAddStudioAction,
   onUpdateStudioAction,
@@ -944,6 +1051,8 @@ function Preview({
   onDragStudioAction,
   onDropStudioAction,
   onCancelGeneration,
+  onCaptureScreenshot,
+  previewVideoRef,
   onSavePrompt,
   onSelectMaterial,
   onToggleMaterial,
@@ -969,7 +1078,9 @@ function Preview({
   isSessionMutationBusy: boolean;
   isGeneratingPrompt: boolean;
   isGeneratingImages: boolean;
+  isGeneratingVideos: boolean;
   onGenerateImages: (presetId: string) => void;
+  onGenerateVideos: (presetId: string) => void;
   onGenerateImagePrompts: (presetId: string) => void;
   onAddStudioAction: (type: StudioActionType) => void;
   onUpdateStudioAction: (id: string, update: Partial<StudioActionButton>) => void;
@@ -977,6 +1088,8 @@ function Preview({
   onDragStudioAction: (id: string | null) => void;
   onDropStudioAction: (id: string) => void;
   onCancelGeneration: () => void;
+  onCaptureScreenshot: () => void;
+  previewVideoRef: React.RefObject<HTMLVideoElement | null>;
   onSavePrompt: (mediaId: string) => void;
   onSelectMaterial: (material: MediaMaterial) => void;
   onToggleMaterial: (materialId: string) => void;
@@ -998,7 +1111,7 @@ function Preview({
         <div className="preview-column"><div className="panel-label">Preview</div>
         <div className="media-stage">
           {selected?.files.video ? (
-            <video controls poster={selected.files.firstFrame ?? selected.files.thumbnail} src={selected.files.video} />
+            <video controls poster={selected.files.firstFrame ?? selected.files.thumbnail} ref={previewVideoRef} src={selected.files.video} />
           ) : imageSource && selected ? (
             <img alt={selected.importItem.title ?? "Imported Instagram media"} src={imageSource} />
           ) : selected ? (
@@ -1008,7 +1121,7 @@ function Preview({
         </div>
         <div className="media-column">
           <div className="panel-label">Media</div>
-          <MediaSelector materials={sourceMaterials} onSelect={onSelectMaterial} onSelectAll={() => setSelectedForGeneration((current) => toggleAllMediaSelection(current, sourceMaterials.map((material) => material.id)))} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
+          <MediaSelector canCaptureScreenshot={Boolean(selected?.files.video)} materials={sourceMaterials} onCaptureScreenshot={onCaptureScreenshot} onSelect={onSelectMaterial} onSelectAll={() => setSelectedForGeneration((current) => toggleAllMediaSelection(current, sourceMaterials.map((material) => material.id)))} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
         </div>
         <div className="media-column generated-media-column">
           <div className="panel-label">Generated Media</div>
@@ -1027,7 +1140,9 @@ function Preview({
           isSessionMutationBusy={isSessionMutationBusy}
           isGeneratingImages={isGeneratingImages}
           isGeneratingPrompt={isGeneratingPrompt}
+          isGeneratingVideos={isGeneratingVideos}
           onGenerateImages={onGenerateImages}
+          onGenerateVideos={onGenerateVideos}
           onGenerateImagePrompts={onGenerateImagePrompts}
           onAddStudioAction={onAddStudioAction}
           onUpdateStudioAction={onUpdateStudioAction}
@@ -1073,7 +1188,9 @@ function GenerationWorkspace({
   isSessionMutationBusy,
   isGeneratingImages,
   isGeneratingPrompt,
+  isGeneratingVideos,
   onGenerateImages,
+  onGenerateVideos,
   onGenerateImagePrompts,
   onAddStudioAction,
   onUpdateStudioAction,
@@ -1095,7 +1212,9 @@ function GenerationWorkspace({
   isSessionMutationBusy: boolean;
   isGeneratingImages: boolean;
   isGeneratingPrompt: boolean;
+  isGeneratingVideos: boolean;
   onGenerateImages: (presetId: string) => void;
+  onGenerateVideos: (presetId: string) => void;
   onGenerateImagePrompts: (presetId: string) => void;
   onAddStudioAction: (type: StudioActionType) => void;
   onUpdateStudioAction: (id: string, update: Partial<StudioActionButton>) => void;
@@ -1122,8 +1241,10 @@ function GenerationWorkspace({
           {studioActionButtons.map((action) => {
             const presets = action.type === "text" ? ollamaPresets : runningHubWorkflows;
             const ready = Boolean(action.presetId && presets.some((preset) => preset.id === action.presetId));
+            const isGenerating = action.type === "text" ? isGeneratingPrompt : action.type === "image" ? isGeneratingImages : isGeneratingVideos;
+            const actionLabel = action.type === "text" ? `Generate prompt (${selectedForGenerationCount})` : action.type === "image" ? `Image generation (${imageGenerationCount})` : "Video generation";
             return <div className={`studio-action-button studio-action-${action.type}`} draggable={true} key={action.id} onDragEnd={() => onDragStudioAction(null)} onDragOver={(event) => event.preventDefault()} onDragStart={() => onDragStudioAction(action.id)} onDrop={() => onDropStudioAction(action.id)}>
-              <button disabled={isSessionMutationBusy || selectedForGenerationCount === 0 || !ready} onClick={() => action.presetId && (action.type === "text" ? onGenerateImagePrompts(action.presetId) : onGenerateImages(action.presetId))} type="button">{action.type === "text" ? (isGeneratingPrompt ? "Generating" : `Generate prompt (${selectedForGenerationCount})`) : (isGeneratingImages ? "Generating" : `Image generation (${imageGenerationCount})`)}</button>
+              <button disabled={isSessionMutationBusy || selectedForGenerationCount === 0 || !ready} onClick={() => action.presetId && (action.type === "text" ? onGenerateImagePrompts(action.presetId) : action.type === "image" ? onGenerateImages(action.presetId) : onGenerateVideos(action.presetId))} type="button">{isGenerating ? "Generating" : actionLabel}</button>
               <select aria-label={action.type === "text" ? "Workflow Ollama" : "Workflow RunningHub"} className="studio-action-select studio-workflow-select" onChange={(event) => onUpdateStudioAction(action.id, { presetId: event.target.value || undefined })} value={action.presetId ?? ""}>
                 <option value="">□</option>
                 {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.displayId}</option>)}
@@ -1137,6 +1258,7 @@ function GenerationWorkspace({
         <div className="studio-action-add">
           <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("text")} type="button">＋ Текст</button>
           <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("image")} type="button">＋ Изображение</button>
+          <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("video")} type="button">＋ Видео</button>
         </div>
       </aside>
     </div>
@@ -1145,6 +1267,8 @@ function GenerationWorkspace({
 
 function MediaSelector({
   materials,
+  canCaptureScreenshot = false,
+  onCaptureScreenshot,
   onSelect,
   onSelectAll,
   onToggle,
@@ -1152,6 +1276,8 @@ function MediaSelector({
   selectedForGeneration
 }: {
   materials: MediaMaterial[];
+  canCaptureScreenshot?: boolean;
+  onCaptureScreenshot?: () => void;
   onSelect: (material: MediaMaterial) => void;
   onSelectAll: () => void;
   onToggle: (materialId: string) => void;
@@ -1176,6 +1302,7 @@ function MediaSelector({
           </div>
         ))}
       </div>
+      {onCaptureScreenshot ? <button disabled={!canCaptureScreenshot} onClick={onCaptureScreenshot} type="button">Скриншот</button> : null}
       <button onClick={onSelectAll} type="button">{hasEveryMaterialSelected ? "Снять выделение" : "Выбрать все"}</button>
     </aside>
   );
@@ -1301,9 +1428,11 @@ function getIntegrationName(keyName: ConnectionKeyName): string {
 
 function getStudioIdLabel(studioId: RunningHubBinding["studioId"]): string {
   if (studioId === "1") return "1 · Source image";
-  if (studioId === "2") return "2 · Prompt";
+  if (studioId === "2") return "2 · Prompt image";
   if (studioId === "3") return "3 · Source video";
-  return "4 · Generated image";
+  if (studioId === "4") return "4 · Generated image";
+  if (studioId === "5") return "5 · Prompt video";
+  return "";
 }
 
 function LogPanel({

@@ -11,6 +11,12 @@ describe("assertUniqueRunningHubBindings", () => {
 });
 
 describe("validateRunningHubBindings", () => {
+  it("accepts a dedicated video prompt binding", () => {
+    expect(validateRunningHubBindings([
+      { nodeId: "6", fieldName: "video_prompt", studioId: "5" }
+    ])).toEqual([{ nodeId: "6", fieldName: "video_prompt", studioId: "5" }]);
+  });
+
   it("rejects an incomplete binding instead of silently discarding it", () => {
     expect(() => validateRunningHubBindings([
       { nodeId: "39", fieldName: "", studioId: "1" }

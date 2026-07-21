@@ -77,6 +77,12 @@ export type ImageGenerationJobInput = {
   prompt: string;
 };
 
+export type VideoGenerationJobInput = {
+  sourceVideo: PromptMediaInput;
+  generatedImage: PromptMediaInput;
+  prompt: string;
+};
+
 export type ConnectionKeyName = "apifyApiToken" | "ollamaCloudApiKey" | "runningHubApiKey";
 
 export type OllamaModel = {
@@ -297,6 +303,26 @@ export async function generateImagesWithOptions(jobs: ImageGenerationJobInput[],
       ...(options.runningHubWorkflowPresetId ? { runningHubWorkflowPresetId: options.runningHubWorkflowPresetId } : {}),
       ...(options.batchPosition !== undefined ? { batchPosition: options.batchPosition } : {}),
       ...(options.batchTotal !== undefined ? { batchTotal: options.batchTotal } : {})
+    }),
+    ...(options.signal ? { signal: options.signal } : {})
+  });
+  await assertOk(response);
+  const data = await response.json() as ImageGenerationResponse;
+  return {
+    item: data.item,
+    session: data.session ?? createEmptySession()
+  };
+}
+
+export async function generateVideosWithOptions(job: VideoGenerationJobInput, options: { runningHubWorkflowPresetId?: string; signal?: AbortSignal } = {}): Promise<ImageGenerationResult> {
+  const response = await apiFetch("/api/generation/videos", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      job,
+      ...(options.runningHubWorkflowPresetId ? { runningHubWorkflowPresetId: options.runningHubWorkflowPresetId } : {})
     }),
     ...(options.signal ? { signal: options.signal } : {})
   });

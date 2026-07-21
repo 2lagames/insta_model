@@ -6,10 +6,9 @@ import { assertUniqueRunningHubBindings, normalizeRunningHubBindings, type Runni
 type FetchLike = typeof fetch;
 type StatusCallback = (event: { tone: "running" | "ready" | "error"; message: string; source: "runninghub" }) => void;
 
-const defaultRunningHubBaseUrl = process.env.RUNNINGHUB_API_BASE_URL ?? "https://www.runninghub.cn";
+const defaultRunningHubBaseUrl = process.env.RUNNINGHUB_API_BASE_URL ?? "https://www.runninghub.ai";
 const defaultPollIntervalMs = Number(process.env.RUNNINGHUB_POLL_INTERVAL_MS ?? 5_000);
-const defaultMaxPolls = Number(process.env.RUNNINGHUB_MAX_POLLS ?? 180);
-const defaultOutputMaxPolls = Number(process.env.RUNNINGHUB_OUTPUT_MAX_POLLS ?? 12);
+const defaultMaxPolls = Number(process.env.RUNNINGHUB_MAX_POLLS ?? 360);
 
 export type RunningHubConfig = {
   apiKey: string;
@@ -91,7 +90,17 @@ export function buildRunningHubCreatePayload(input: {
   };
 }
 
+type RunningHubOutputKind = "image" | "video";
+
 export async function runRunningHubImageGeneration(options: RunningHubGenerationOptions): Promise<RunningHubGenerationResult> {
+  return await runRunningHubGeneration(options, "image");
+}
+
+export async function runRunningHubVideoGeneration(options: RunningHubGenerationOptions): Promise<RunningHubGenerationResult> {
+  return await runRunningHubGeneration(options, "video");
+}
+
+async function runRunningHubGeneration(options: RunningHubGenerationOptions, outputKind: RunningHubOutputKind): Promise<RunningHubGenerationResult> {
   const bindings = assertRunningHubConfig(options.config);
 
   if (options.jobs.length === 0) {
@@ -111,6 +120,8 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
   const outputDateDir = join(options.outputDir, dateFolder);
   const allAssets: ImportAsset[] = [];
   const taskIds: string[] = [];
+  const outputLabel = outputKind === "video" ? "video" : "image";
+  const sourceInputLabel = outputKind === "video" ? "source media" : "source image";
 
   await mkdir(outputDateDir, { recursive: true });
 
@@ -120,7 +131,7 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
     options.onStatus?.({
       tone: "running",
       source: "runninghub",
-      message: `Uploading source image for ${passLabel}.`
+      message: `Uploading ${sourceInputLabel} for ${passLabel}.`
     });
 
     let fieldValues: Map<string, string>;
@@ -162,7 +173,7 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
       source: "runninghub",
       message: `RunningHub task ${taskId} created for ${passLabel}. Waiting for completion.`
     });
-    await waitForTaskCompletion({
+    const outputUrls = await waitForTaskResult({
       apiKey: options.config.apiKey,
       baseUrl,
       fetchImpl,
@@ -173,23 +184,12 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
       signal: options.signal
     });
 
-    const imageUrls = await waitForTaskOutputs({
-      apiKey: options.config.apiKey,
-      baseUrl,
-      fetchImpl,
-      taskId,
-      pollIntervalMs: options.pollIntervalMs ?? defaultPollIntervalMs,
-      maxPolls: options.maxPolls ?? defaultOutputMaxPolls,
-      onStatus: options.onStatus,
-      signal: options.signal
-    });
-
     options.onStatus?.({
       tone: "running",
       source: "runninghub",
-      message: `Downloading ${imageUrls.length} RunningHub image(s) for ${passLabel}.`
+      message: `Downloading ${outputUrls.length} RunningHub ${outputLabel}(s) for ${passLabel}.`
     });
-    const savedAssets = await Promise.all(imageUrls.map((url, outputIndex) => downloadOutputImage({
+    const savedAssets = await Promise.all(outputUrls.map((url, outputIndex) => downloadOutputAsset({
       fetchImpl,
       outputDateDir,
       dateFolder,
@@ -197,6 +197,7 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
       sourceMediaId: job.mediaId,
       url,
       outputIndex,
+      outputKind,
       signal: options.signal
     })));
     allAssets.push(...savedAssets);
@@ -206,11 +207,11 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
   const item: ImportItem = {
     id: itemId,
     sourceUrl: `runninghub://${taskIds.join(",")}`,
-    mediaType: allAssets.length === 1 ? "image" : "carousel",
+    mediaType: outputKind === "video" ? "video" : allAssets.length === 1 ? "image" : "carousel",
     status: "ready",
     createdAt: now.toISOString(),
-    title: `RunningHub generation (${allAssets.length} images)`,
-    caption: `Generated ${allAssets.length} image(s) from ${options.jobs.length} selected media item(s).`,
+    title: `RunningHub generation (${allAssets.length} ${outputLabel}(s))`,
+    caption: `Generated ${allAssets.length} ${outputLabel}(s) from ${options.jobs.length} selected media item(s).`,
     provider: "runninghub",
     files: allAssets[0]?.files ?? {},
     assets: allAssets
@@ -219,7 +220,7 @@ export async function runRunningHubImageGeneration(options: RunningHubGeneration
   options.onStatus?.({
     tone: "ready",
     source: "runninghub",
-    message: `RunningHub generation complete: ${allAssets.length} image(s) saved to output/${dateFolder}.`
+    message: `RunningHub generation complete: ${allAssets.length} ${outputLabel}(s) saved to output/${dateFolder}.`
   });
 
   return { item, assets: allAssets };
@@ -285,17 +286,21 @@ async function createTask(options: {
   fieldValues: Map<string, string>;
   signal?: AbortSignal;
 }): Promise<string> {
-  const response = await postRunningHub(options.fetchImpl, new URL("/task/openapi/create", options.baseUrl), buildRunningHubCreatePayload({
+  const payload = buildRunningHubCreatePayload({
     apiKey: options.config.apiKey,
     workflowId: options.config.workflowId,
     bindings: options.bindings,
     fieldValues: options.fieldValues
-  }), "creating task", options.signal);
-  const payload = await response.json() as unknown;
-  assertRunningHubOk(payload, "create task");
-  const taskId = extractTaskId(payload);
+  });
+  const response = await postRunningHubV2(options.fetchImpl, new URL(`/openapi/v2/run/workflow/${encodeURIComponent(options.config.workflowId)}`, options.baseUrl), {
+    instanceType: payload.instanceType,
+    nodeInfoList: payload.nodeInfoList
+  }, options.config.apiKey, "creating task", options.signal);
+  const responsePayload = await response.json() as unknown;
+  assertRunningHubOk(responsePayload, "create task");
+  const taskId = extractTaskId(responsePayload);
   if (!taskId) {
-    throw new Error(`RunningHub create task response did not include a taskId: ${JSON.stringify(payload)}`);
+    throw new Error(`RunningHub create task response did not include a taskId: ${JSON.stringify(responsePayload)}`);
   }
   return taskId;
 }
@@ -308,13 +313,13 @@ export async function uploadRunningHubImage(options: {
   signal?: AbortSignal;
 }): Promise<string> {
   const form = new FormData();
-  form.set("apiKey", options.apiKey);
   form.set("file", new Blob([await readFile(options.imagePath)]), basename(options.imagePath));
 
-  const response = await postRunningHubForm(
+  const response = await postRunningHubV2Form(
     options.fetchImpl,
-    new URL("/task/openapi/upload", options.baseUrl),
+    new URL("/openapi/v2/media/upload/binary", options.baseUrl),
     form,
+    options.apiKey,
     "uploading source image",
     options.signal
   );
@@ -340,11 +345,11 @@ async function resolveStudioFieldValues(options: {
     ["3", options.job.videoPath],
     ["4", options.job.generatedImagePath]
   ]);
-  const fieldValues = new Map<StudioId, string>([["2", options.job.prompt]]);
+  const fieldValues = new Map<StudioId, string>([["2", options.job.prompt], ["5", options.job.prompt]]);
   const uploadedFiles = new Map<string, string>();
 
   for (const binding of options.bindings) {
-    if (binding.studioId === "2" || fieldValues.has(binding.studioId)) {
+    if (fieldValues.has(binding.studioId)) {
       continue;
     }
     const path = localFilePaths.get(binding.studioId);
@@ -368,7 +373,7 @@ async function resolveStudioFieldValues(options: {
   return fieldValues;
 }
 
-async function waitForTaskCompletion(options: {
+async function waitForTaskResult(options: {
   apiKey: string;
   baseUrl: string;
   fetchImpl: FetchLike;
@@ -377,13 +382,10 @@ async function waitForTaskCompletion(options: {
   maxPolls: number;
   onStatus?: StatusCallback;
   signal?: AbortSignal;
-}): Promise<void> {
+}): Promise<string[]> {
   for (let attempt = 1; attempt <= options.maxPolls; attempt += 1) {
     throwIfAborted(options.signal);
-    const response = await postRunningHub(options.fetchImpl, new URL("/task/openapi/status", options.baseUrl), {
-      apiKey: options.apiKey,
-      taskId: options.taskId
-    }, `checking task ${options.taskId}`, options.signal);
+    const response = await postRunningHubV2(options.fetchImpl, new URL("/openapi/v2/query", options.baseUrl), { taskId: options.taskId }, options.apiKey, `checking task ${options.taskId}`, options.signal);
     const payload = await response.json() as unknown;
     assertRunningHubOk(payload, `check task ${options.taskId}`);
     const status = extractStatus(payload);
@@ -395,69 +397,23 @@ async function waitForTaskCompletion(options: {
     });
 
     if (isSuccessStatus(status)) {
-      return;
+      const outputUrls = extractOutputUrls(payload);
+      if (outputUrls.length > 0) {
+        return outputUrls;
+      }
+      options.onStatus?.({
+        tone: "running",
+        source: "runninghub",
+        message: `RunningHub task ${options.taskId}: completed but result file is not ready yet (${attempt}/${options.maxPolls}).`
+      });
     }
     if (isFailureStatus(status)) {
-      throw new Error(`RunningHub task ${options.taskId} failed with status: ${status}`);
+      throw new Error(`RunningHub task ${options.taskId} failed with status: ${status}${getRunningHubErrorMessage(payload)}`);
     }
     await sleep(options.pollIntervalMs, options.signal);
   }
 
-  throw new Error(`RunningHub task ${options.taskId} did not finish after ${options.maxPolls} status checks.`);
-}
-
-async function fetchTaskOutputs(options: {
-  apiKey: string;
-  baseUrl: string;
-  fetchImpl: FetchLike;
-  taskId: string;
-  signal?: AbortSignal;
-}): Promise<string[]> {
-  const response = await postRunningHub(options.fetchImpl, new URL("/task/openapi/outputs", options.baseUrl), {
-    apiKey: options.apiKey,
-    taskId: options.taskId
-  }, `loading task ${options.taskId} outputs`, options.signal);
-  const payload = await response.json() as unknown;
-  assertRunningHubOk(payload, `load task ${options.taskId} outputs`);
-  return extractImageUrls(payload);
-}
-
-async function waitForTaskOutputs(options: {
-  apiKey: string;
-  baseUrl: string;
-  fetchImpl: FetchLike;
-  taskId: string;
-  pollIntervalMs: number;
-  maxPolls: number;
-  onStatus?: StatusCallback;
-  signal?: AbortSignal;
-}): Promise<string[]> {
-  let lastCount = 0;
-
-  for (let attempt = 1; attempt <= options.maxPolls; attempt += 1) {
-    throwIfAborted(options.signal);
-    const urls = await fetchTaskOutputs({
-      apiKey: options.apiKey,
-      baseUrl: options.baseUrl,
-      fetchImpl: options.fetchImpl,
-      taskId: options.taskId,
-      signal: options.signal
-    });
-    lastCount = urls.length;
-
-    if (urls.length > 0) {
-      return urls;
-    }
-
-    options.onStatus?.({
-      tone: "running",
-      source: "runninghub",
-      message: `RunningHub task ${options.taskId}: outputs are not ready yet (0 images, ${attempt}/${options.maxPolls}).`
-    });
-    await sleep(options.pollIntervalMs, options.signal);
-  }
-
-  throw new Error(`RunningHub task ${options.taskId} outputs were not ready after ${options.maxPolls} checks (${lastCount} image URLs found).`);
+  throw new Error(`RunningHub task ${options.taskId} did not return a result after ${options.maxPolls} status checks.`);
 }
 
 async function postRunningHub(fetchImpl: FetchLike, url: URL, body: unknown, action: string, signal?: AbortSignal): Promise<Response> {
@@ -487,6 +443,49 @@ async function postRunningHubForm(fetchImpl: FetchLike, url: URL, form: FormData
   try {
     response = await fetchImpl(url, withSignal({
       method: "POST",
+      body: form
+    }, signal));
+  } catch (error) {
+    throwIfAborted(signal);
+    const message = error instanceof Error ? error.message : "unknown error";
+    throw new Error(`RunningHub request failed while ${action}: ${message}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(`RunningHub request failed while ${action} with ${response.status}: ${await response.text()}`);
+  }
+  return response;
+}
+
+async function postRunningHubV2(fetchImpl: FetchLike, url: URL, body: unknown, apiKey: string, action: string, signal?: AbortSignal): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, withSignal({
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(body)
+    }, signal));
+  } catch (error) {
+    throwIfAborted(signal);
+    const message = error instanceof Error ? error.message : "unknown error";
+    throw new Error(`RunningHub request failed while ${action}: ${message}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(`RunningHub request failed while ${action} with ${response.status}: ${await response.text()}`);
+  }
+  return response;
+}
+
+async function postRunningHubV2Form(fetchImpl: FetchLike, url: URL, form: FormData, apiKey: string, action: string, signal?: AbortSignal): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, withSignal({
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
       body: form
     }, signal));
   } catch (error) {
@@ -552,9 +551,21 @@ function extractStatus(payload: unknown): string | undefined {
   return collectStringFields(payload, ["status", "taskStatus", "state"])[0];
 }
 
-function extractImageUrls(payload: unknown): string[] {
-  const urls = collectStringFields(payload, ["fileUrl", "file_url", "imageUrl", "image_url", "url", "downloadUrl", "download_url"]);
+function extractOutputUrls(payload: unknown): string[] {
+  const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : undefined;
+  const urls = record && Array.isArray(record.results)
+    ? record.results.flatMap((result) => result && typeof result === "object" && typeof (result as Record<string, unknown>).url === "string" ? [(result as Record<string, unknown>).url as string] : [])
+    : collectStringFields(payload, ["url"]);
   return urls.filter((url) => /^https?:\/\//i.test(url));
+}
+
+function getRunningHubErrorMessage(payload: unknown): string {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return "";
+  }
+  const record = payload as Record<string, unknown>;
+  const message = record.errorMessage ?? record.message;
+  return typeof message === "string" && message.trim() ? `: ${message}` : "";
 }
 
 function collectStringFields(value: unknown, fieldNames: string[]): string[] {
@@ -579,7 +590,7 @@ function collectStringFields(value: unknown, fieldNames: string[]): string[] {
   return [...direct, ...nested];
 }
 
-async function downloadOutputImage(options: {
+async function downloadOutputAsset(options: {
   fetchImpl: FetchLike;
   outputDateDir: string;
   dateFolder: string;
@@ -587,6 +598,7 @@ async function downloadOutputImage(options: {
   sourceMediaId: string;
   url: string;
   outputIndex: number;
+  outputKind: RunningHubOutputKind;
   signal?: AbortSignal;
 }): Promise<ImportAsset> {
   throwIfAborted(options.signal);
@@ -597,23 +609,27 @@ async function downloadOutputImage(options: {
     throw new Error(`Could not download RunningHub output ${options.url}: ${response.status} ${await response.text()}`);
   }
 
-  const extension = getOutputExtension(options.url, response.headers.get("Content-Type"));
-  const fileName = `${sanitizeFilePart(options.taskId)}-image-${options.outputIndex + 1}${extension}`;
+  const extension = getOutputExtension(options.url, response.headers.get("Content-Type"), options.outputKind);
+  const fileName = `${sanitizeFilePart(options.taskId)}-${options.outputKind}-${options.outputIndex + 1}${extension}`;
   const absolutePath = join(options.outputDateDir, fileName);
   const bytes = Buffer.from(await response.arrayBuffer());
   await writeFile(absolutePath, bytes);
 
-  return {
-    id: `${sanitizeFilePart(options.sourceMediaId)}-output-${options.outputIndex + 1}-${sanitizeFilePart(options.taskId)}`,
-    mediaType: "image",
-    files: {
-      image: `/output/${options.dateFolder}/${fileName}`,
-      thumbnail: `/output/${options.dateFolder}/${fileName}`
+  const publicPath = `/output/${options.dateFolder}/${fileName}`;
+  return options.outputKind === "video"
+    ? {
+      id: `${sanitizeFilePart(options.sourceMediaId)}-video-${options.outputIndex + 1}-${sanitizeFilePart(options.taskId)}`,
+      mediaType: "video",
+      files: { video: publicPath }
     }
-  };
+    : {
+      id: `${sanitizeFilePart(options.sourceMediaId)}-output-${options.outputIndex + 1}-${sanitizeFilePart(options.taskId)}`,
+      mediaType: "image",
+      files: { image: publicPath, thumbnail: publicPath }
+    };
 }
 
-function getOutputExtension(url: string, contentType: string | null): string {
+function getOutputExtension(url: string, contentType: string | null, outputKind: RunningHubOutputKind): string {
   const pathExtension = extname(new URL(url).pathname);
   if (pathExtension && pathExtension.length <= 6) {
     return pathExtension;
@@ -624,7 +640,7 @@ function getOutputExtension(url: string, contentType: string | null): string {
   if (contentType?.includes("webp")) {
     return ".webp";
   }
-  return ".png";
+  return outputKind === "video" ? ".mp4" : ".png";
 }
 
 function sanitizeFilePart(value: string): string {

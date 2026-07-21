@@ -14,6 +14,7 @@ import {
   saveConnectionKey,
   uploadLocalImage
 } from "./api";
+import * as api from "./api";
 
 describe("uploadLocalImage", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -129,6 +130,28 @@ describe("generateImages", () => {
 
     expect(fetchSpy).toHaveBeenCalledWith("/api/generation/images", expect.objectContaining({
       body: JSON.stringify({ jobs: [{ media, prompt: "prompt" }], batchPosition: 2, batchTotal: 2 })
+    }));
+  });
+});
+
+describe("generateVideos", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("posts a checked source video, generated image, and video prompt to the dedicated endpoint", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      item: { id: "generated-video-1", assets: [], files: {}, status: "ready", mediaType: "video", createdAt: "2026-07-20", sourceUrl: "runninghub://task-video" },
+      session: { itemIds: ["generated-video-1"], sceneBibles: [], mediaSceneMap: {} }
+    })));
+    const sourceVideo = { id: "reel:video", label: "Reel", imagePath: "/input/frame.jpg", videoPath: "/input/reel.mp4", sourceKind: "video-first-frame" as const };
+    const generatedImage = { id: "generated:image", label: "Generated image", imagePath: "/output/image.png", generatedImagePath: "/output/image.png", sourceKind: "photo" as const };
+    const job: { sourceVideo: typeof sourceVideo; generatedImage: typeof generatedImage; prompt: string } = { sourceVideo, generatedImage, prompt: "Animate the scene" };
+
+    await (api as typeof api & { generateVideosWithOptions: (job: { sourceVideo: typeof sourceVideo; generatedImage: typeof generatedImage; prompt: string }, options: { runningHubWorkflowPresetId: string }) => Promise<unknown> })
+      .generateVideosWithOptions(job, { runningHubWorkflowPresetId: "rh-video" });
+
+    expect(fetchSpy).toHaveBeenCalledWith("/api/generation/videos", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ job, runningHubWorkflowPresetId: "rh-video" })
     }));
   });
 });

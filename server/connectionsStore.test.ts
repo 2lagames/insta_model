@@ -260,6 +260,18 @@ describe("ConnectionsStore", () => {
     });
   });
 
+  it("persists a video generation action with its RunningHub workflow", async () => {
+    const store = new ConnectionsStore(tempDir);
+    await store.save({
+      runningHubWorkflows: [{ id: "rh-video", displayId: "RH01", workflowId: "workflow-video", bindings: [{ nodeId: "6", fieldName: "video_prompt", studioId: "5" }] }],
+      studioActionButtons: [{ id: "video-action", label: "Генерация видео", type: "video", presetId: "rh-video", order: 0 }]
+    } as Parameters<ConnectionsStore["save"]>[0]);
+
+    await expect(store.readPublic()).resolves.toMatchObject({
+      studioActionButtons: [{ id: "video-action", type: "video", presetId: "rh-video" }]
+    });
+  });
+
   it("restores an editable binding row for a workflow saved without bindings", async () => {
     const store = new ConnectionsStore(tempDir);
     await store.save({

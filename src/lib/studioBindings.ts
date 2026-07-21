@@ -1,4 +1,4 @@
-export const studioIds = ["1", "2", "3", "4"] as const;
+export const studioIds = ["1", "2", "3", "4", "5"] as const;
 
 export type StudioId = typeof studioIds[number];
 

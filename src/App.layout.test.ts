@@ -27,6 +27,7 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("handleImport(true)");
     expect(appSource).toContain("onClick={() => void handleImport()}");
     expect(appSource).toContain("Обновить заново");
+    expect(appSource).toContain('accept="image/*,video/*"');
     expect(appSource).toContain("Using previously downloaded media.");
     expect(appSource.indexOf("Generate prompt")).toBeLessThan(appSource.indexOf("Image generation"));
     expect(appSource).toContain("EventSource");
@@ -139,13 +140,13 @@ describe("studio preview layout", () => {
     expect(saveHandler).toContain("studioActionButtons");
   });
 
-  it("offers explicit prompt saving and describes a local image source", () => {
+  it("offers explicit prompt saving and describes a local media source", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
 
     expect(appSource).toContain("saveSessionPrompts");
     expect(appSource).toContain("onSave");
     expect(appSource).toContain(">Сохранить</button>");
-    expect(appSource).toContain("Локальное изображение — ссылка Instagram отсутствует");
+    expect(appSource).toContain("Локальное медиа — ссылка Instagram отсутствует");
     expect(appSource).toContain("urlNotice");
   });
 
@@ -205,6 +206,58 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("Generate prompts with a text action before image generation.");
   });
 
+  it("offers a screenshot control above source media selection", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const previewStart = appSource.indexOf("function Preview({");
+    const preview = appSource.slice(previewStart, appSource.indexOf("function GenerationWorkspace", previewStart));
+    const mediaSelectorStart = appSource.indexOf("function MediaSelector({");
+    const mediaSelector = appSource.slice(mediaSelectorStart, appSource.indexOf("function PromptEditors", mediaSelectorStart));
+
+    expect(preview).toContain("onCaptureScreenshot=");
+    expect(preview).toContain("canCaptureScreenshot={Boolean(selected?.files.video)}");
+    expect(mediaSelector).toContain(">Скриншот</button>");
+    expect(mediaSelector.indexOf(">Скриншот</button>")).toBeLessThan(mediaSelector.indexOf('"Снять выделение" : "Выбрать все"'));
+  });
+
+  it("captures only the current preview video frame and saves it in Media", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const screenshotStart = appSource.indexOf("async function handleCaptureVideoScreenshot()");
+    const screenshotHandler = appSource.slice(screenshotStart, appSource.indexOf("async function handleOpenFolder", screenshotStart));
+
+    expect(appSource).toContain("const previewVideoRef = useRef<HTMLVideoElement | null>(null);");
+    expect(appSource).toContain("ref={previewVideoRef}");
+    expect(screenshotHandler).toContain("video?.videoWidth");
+    expect(screenshotHandler).toContain("canvas.getContext(\"2d\")");
+    expect(screenshotHandler).toContain("context.drawImage(video, 0, 0, width, height)");
+    expect(screenshotHandler).toContain('canvas.toBlob(resolve, "image/png")');
+    expect(screenshotHandler).toContain("new File([blob],");
+    expect(screenshotHandler).toContain("uploadLocalImage(file, { appendToSession: true })");
+  });
+
+  it("regenerates selected prompts even when a prompt already exists", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const promptCreationStart = appSource.indexOf("async function createSelectedPrompts");
+    const promptCreation = appSource.slice(promptCreationStart, appSource.indexOf("async function handleGenerateImagePrompts", promptCreationStart));
+
+    expect(promptCreation).toContain("for (const media of selectedPromptMedia)");
+    expect(promptCreation).not.toContain("missingPromptMedia");
+    expect(promptCreation).toContain("mergePromptDocuments(current, [prompt])");
+  });
+
+  it("offers a video action for one checked source video and generated image", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const videoHandlerStart = appSource.indexOf("async function handleGenerateVideos");
+    const videoHandler = appSource.slice(videoHandlerStart, appSource.indexOf("function handleCancelGeneration", videoHandlerStart));
+
+    expect(appSource).toContain("＋ Видео");
+    expect(appSource).toContain('if (studioId === "2") return "2 · Prompt image"');
+    expect(appSource).toContain('if (studioId === "5") return "5 · Prompt video"');
+    expect(videoHandler).toContain("media.mediaType === \"video\"");
+    expect(videoHandler).toContain("generatedMaterials.filter");
+    expect(videoHandler).toContain("generateVideosWithOptions");
+    expect(videoHandler).toContain("Select exactly one source video and one generated image before video generation.");
+  });
+
   it("shows a cancellation action in the generation workspace and uses IMAGE labels", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
 
@@ -248,7 +301,7 @@ describe("studio preview layout", () => {
 
   it("keeps every successful batch upload reflected locally before a later upload can fail", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
-    const uploadStart = appSource.indexOf("async function handleLocalImageUpload");
+    const uploadStart = appSource.indexOf("async function handleLocalMediaUpload");
     const uploadHandler = appSource.slice(uploadStart, appSource.indexOf("async function handleOpenFolder", uploadStart));
 
     expect(uploadHandler).toContain("const imported = await uploadLocalImage");
@@ -286,7 +339,7 @@ describe("studio preview layout", () => {
 
     expect(appSource).toContain("const [isResetting, setIsResetting] = useState(false);");
     expect(appSource).toContain("const [isSavingPrompt, setIsSavingPrompt] = useState(false);");
-    expect(appSource).toContain("const isSessionMutationBusy = isImporting || isResetting || isSavingPrompt || isGeneratingPrompt || isGeneratingImages;");
+    expect(appSource).toContain("const isSessionMutationBusy = isImporting || isResetting || isSavingPrompt || isGeneratingPrompt || isGeneratingImages || isGeneratingVideos;");
     expect(appSource).toContain("const isSessionMutationBusyRef = useRef(false);");
     expect(appSource).toContain("function tryBeginSessionMutation()");
     expect(controls).toContain("disabled={isSessionMutationBusy}");
@@ -325,7 +378,7 @@ describe("studio preview layout", () => {
     const generationWorkspaceStart = appSource.indexOf("function GenerationWorkspace({");
     const generationWorkspace = appSource.slice(generationWorkspaceStart, appSource.indexOf("function MediaSelector", generationWorkspaceStart));
 
-    expect(generationWorkspace).not.toContain("Video generation");
+    expect(generationWorkspace).toContain("Video generation");
     expect(generationWorkspace).not.toContain("Trend analysis");
     expect(generationWorkspace).not.toContain("Caption and hashtags");
     expect(cssSource).toContain("grid-auto-rows: minmax(42px, auto);");

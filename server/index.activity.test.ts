@@ -12,6 +12,21 @@ describe("image prompt activity", () => {
     expect(uploadRoute).toContain("store.startCurrentSession(item.id)");
   });
 
+  it("stores local videos with a first-frame preview", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+    const uploadRouteStart = source.indexOf('app.post("/api/imports/upload-image"');
+    const uploadRoute = source.slice(uploadRouteStart, source.indexOf('app.get("/api/connections"', uploadRouteStart));
+    const videoItemStart = source.indexOf("async function createLocalVideoItem");
+    const videoItem = source.slice(videoItemStart, source.indexOf("function isGenerationCancelled", videoItemStart));
+
+    expect(uploadRoute).toContain('type: ["image/*", "video/*"]');
+    expect(uploadRoute).toContain("createLocalVideoItem");
+    expect(videoItem).toContain("generateFirstFrameWithFfmpeg");
+    expect(videoItem).toContain("firstFrame: firstFramePath");
+    expect(videoItem).toContain("thumbnail: firstFramePath");
+    expect(videoItem).toContain("video: mediaPath");
+  });
+
   it("publishes each generated prompt into the activity log", () => {
     const source = readFileSync("server/index.ts", "utf8");
 
@@ -145,6 +160,18 @@ describe("image prompt activity", () => {
     expect(imageRoute).toContain("videoPath: job.media.videoPath ? resolveStudioMediaPath(job.media.videoPath) : undefined");
     expect(imageRoute).toContain("onTaskCreated");
     expect(imageRoute).toContain("activeGeneration.registerRunningHubTask");
+  });
+
+  it("runs a video workflow with the checked source video, generated image, and video prompt", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+    const videoRouteStart = source.indexOf('app.post("/api/generation/videos"');
+    const videoRoute = source.slice(videoRouteStart, source.indexOf('app.post("/api/generation/cancel"', videoRouteStart));
+
+    expect(videoRoute).toContain("parseRunningHubVideoJob(request.body?.job)");
+    expect(videoRoute).toContain("runRunningHubVideoGeneration");
+    expect(videoRoute).toContain("videoPath: resolveStudioMediaPath(job.sourceVideo.videoPath)");
+    expect(videoRoute).toContain("generatedImagePath: resolveStudioMediaPath(job.generatedImage.generatedImagePath)");
+    expect(videoRoute).toContain("prompt: job.prompt");
   });
 
   it("exposes one cancellation route for active generation work", () => {

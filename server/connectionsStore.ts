@@ -229,7 +229,7 @@ function normalizeStudioActionButtons(items: StudioActionButton[] | undefined, w
   const workflowIds = new Set(workflows.map((item) => item.id));
   const presetIds = new Set(presets.map((item) => item.id));
   return (items ?? []).flatMap((item) => {
-    if (!item || typeof item.id !== "string" || typeof item.label !== "string" || !Number.isInteger(item.order) || (item.type !== "text" && item.type !== "image")) return [];
+    if (!item || typeof item.id !== "string" || typeof item.label !== "string" || !Number.isInteger(item.order) || (item.type !== "text" && item.type !== "image" && item.type !== "video")) return [];
     const presetId = typeof item.presetId === "string" && (item.type === "text" ? presetIds.has(item.presetId) : workflowIds.has(item.presetId)) ? item.presetId : undefined;
     return [{ id: item.id, label: item.label, type: item.type, ...(presetId ? { presetId } : {}), order: item.order }];
   }).sort((left, right) => left.order - right.order).map((item, order) => ({ ...item, order }));

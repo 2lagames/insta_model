@@ -8,13 +8,13 @@ import { ActivityLog } from "./activityLog";
 import { ConnectionsStore, getRunningHubWorkflows, type ConnectionKeyName } from "./connectionsStore";
 import { type PromptMediaInput } from "./ideogramPrompt";
 import { ImportStore, normalizeCurrentSession } from "./importStore";
-import { importInstagramUrl } from "./instagramImporter";
+import { generateFirstFrameWithFfmpeg, importInstagramUrl } from "./instagramImporter";
 import { resolveImportMetadataPath } from "./localMetadata";
 import { generateOllamaPrompt, listOllamaModels } from "./ollamaClient";
 import { getOllamaConfigurationForPreset } from "./ollamaConfiguration";
 import type { OllamaPreset, RunningHubWorkflowPreset, StudioActionButton } from "../src/lib/generationPresets";
 import { GenerationCancelledError, GenerationController, type GenerationOperation } from "./generationController";
-import { cancelRunningHubTask, runRunningHubImageGeneration } from "./runningHub";
+import { cancelRunningHubTask, runRunningHubImageGeneration, runRunningHubVideoGeneration } from "./runningHub";
 
 const port = Number(process.env.API_PORT ?? 4317);
 const projectRoot = process.cwd();
@@ -77,22 +77,27 @@ app.get("/api/imports", async (_request, response) => {
   }
 });
 
-app.post("/api/imports/upload-image", express.raw({ type: "image/*", limit: "25mb" }), async (request, response) => {
+app.post("/api/imports/upload-image", express.raw({ type: ["image/*", "video/*"], limit: "100mb" }), async (request, response) => {
   try {
-    if (!request.is("image/*") || !Buffer.isBuffer(request.body) || request.body.length === 0) {
-      response.status(400).json({ error: "Choose a non-empty image file." });
+    const isImage = request.is("image/*") !== false;
+    const isVideo = request.is("video/*") !== false;
+    if ((!isImage && !isVideo) || !Buffer.isBuffer(request.body) || request.body.length === 0) {
+      response.status(400).json({ error: "Choose a non-empty image or video file." });
       return;
     }
-    const encodedFileName = String(request.header("X-File-Name") ?? "image");
+    const encodedFileName = String(request.header("X-File-Name") ?? (isVideo ? "video" : "image"));
     const fileName = basename(decodeURIComponent(encodedFileName));
-    const extension = extname(fileName) || imageExtension(request.header("Content-Type") ?? "");
+    const extension = extname(fileName) || (isVideo ? videoExtension(request.header("Content-Type") ?? "") : imageExtension(request.header("Content-Type") ?? ""));
     const id = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const folder = join(inputDir, "local", formatDateFolder(new Date()));
     await mkdir(folder, { recursive: true });
-    const path = join(folder, `${id}${extension || ".png"}`);
+    const path = join(folder, `${id}${extension || (isVideo ? ".mp4" : ".png")}`);
     await writeFile(path, request.body);
-    const imagePath = `/input/${relative(inputDir, path).replaceAll("\\", "/")}`;
-    const item: ImportItem = { id, sourceUrl: `local://${fileName}`, mediaType: "image", status: "ready", createdAt: new Date().toISOString(), title: fileName, provider: "local", files: { image: imagePath }, assets: [{ id: "image", mediaType: "image", files: { image: imagePath } }] };
+    const mediaPath = `/input/${relative(inputDir, path).replaceAll("\\", "/")}`;
+    const createdAt = new Date().toISOString();
+    const item: ImportItem = isVideo
+      ? await createLocalVideoItem({ id, fileName, videoFilePath: path, folder, mediaPath, createdAt })
+      : { id, sourceUrl: `local://${fileName}`, mediaType: "image", status: "ready", createdAt, title: fileName, provider: "local", files: { image: mediaPath }, assets: [{ id: "image", mediaType: "image", files: { image: mediaPath } }] };
     await store.saveItem(item);
     const appendToSession = request.get("X-Append-To-Session") === "true";
     if (appendToSession) await store.appendToCurrentSession(item.id);
@@ -394,6 +399,64 @@ app.post("/api/generation/images", async (request, response) => {
   }
 });
 
+app.post("/api/generation/videos", async (request, response) => {
+  let generation: GenerationOperation | undefined;
+  try {
+    const job = parseRunningHubVideoJob(request.body?.job);
+    const activeGeneration = generationController.start();
+    generation = activeGeneration;
+    const connections = await connectionsStore.readPrivate();
+    const workflow = getRunningHubWorkflows(connections).find((item) => item.id === requiredString(request.body?.runningHubWorkflowPresetId, "Select a RunningHub workflow before video generation."));
+    if (!workflow) throw new Error("Select an available RunningHub workflow before video generation.");
+    const currentSession = await store.readCurrentSession();
+    activityLog.publish({ tone: "running", source: "generation", message: "RunningHub video generation started." });
+
+    const runningHubResult = await runRunningHubVideoGeneration({
+      outputDir,
+      config: {
+        apiKey: connections.runningHubApiKey ?? "",
+        workflowId: workflow.workflowId,
+        bindings: workflow.bindings
+      },
+      jobs: [{
+        mediaId: job.sourceVideo.id,
+        label: job.sourceVideo.label,
+        videoPath: resolveStudioMediaPath(job.sourceVideo.videoPath),
+        generatedImagePath: resolveStudioMediaPath(job.generatedImage.generatedImagePath),
+        prompt: job.prompt
+      }],
+      onStatus: (event) => activityLog.publish(event),
+      signal: activeGeneration.signal,
+      onTaskCreated: (taskId) => activeGeneration.registerRunningHubTask({
+        apiKey: connections.runningHubApiKey ?? "",
+        taskId
+      })
+    });
+    generation.throwIfCancelled();
+    await store.saveItem(runningHubResult.item);
+    await store.appendToCurrentSession(runningHubResult.item.id, {
+      sceneBibles: currentSession.sceneBibles,
+      mediaSceneMap: {
+        ...currentSession.mediaSceneMap,
+        ...mapGeneratedAssetsToScenes(runningHubResult.item, runningHubResult.assets, [job.sourceVideo], currentSession.mediaSceneMap)
+      }
+    });
+    response.json({ item: runningHubResult.item, session: await store.readCurrentSession() });
+  } catch (error) {
+    if (isGenerationCancelled(error, generation)) {
+      activityLog.publish({ tone: "ready", source: "generation", message: "Video generation cancelled." });
+      response.status(499).json({ error: "Generation cancelled." });
+    } else {
+      activityLog.publish({ tone: "error", source: "generation", message: toErrorMessage(error) });
+      response.status(500).json({ error: toErrorMessage(error) });
+    }
+  } finally {
+    if (generation) {
+      generationController.finish(generation);
+    }
+  }
+});
+
 app.post("/api/generation/cancel", async (_request, response) => {
   const cancelled = await generationController.cancel();
   activityLog.publish({
@@ -437,6 +500,32 @@ function formatDateFolder(date: Date): string {
 
 function imageExtension(contentType: string): string {
   return contentType === "image/jpeg" ? ".jpg" : contentType === "image/webp" ? ".webp" : contentType === "image/gif" ? ".gif" : ".png";
+}
+
+function videoExtension(contentType: string): string {
+  return contentType === "video/quicktime" ? ".mov" : contentType === "video/webm" ? ".webm" : ".mp4";
+}
+
+async function createLocalVideoItem({
+  id,
+  fileName,
+  videoFilePath,
+  folder,
+  mediaPath,
+  createdAt
+}: {
+  id: string;
+  fileName: string;
+  videoFilePath: string;
+  folder: string;
+  mediaPath: string;
+  createdAt: string;
+}): Promise<ImportItem> {
+  const firstFrameFilePath = join(folder, `${id}-first-frame.jpg`);
+  await generateFirstFrameWithFfmpeg(videoFilePath, firstFrameFilePath);
+  const firstFramePath = `/input/${relative(inputDir, firstFrameFilePath).replaceAll("\\", "/")}`;
+  const files = { video: mediaPath, firstFrame: firstFramePath, thumbnail: firstFramePath };
+  return { id, sourceUrl: `local://${fileName}`, mediaType: "video", status: "ready", createdAt, title: fileName, provider: "local", files, assets: [{ id: "video", mediaType: "video", files }] };
 }
 
 function isGenerationCancelled(error: unknown, generation: { signal: AbortSignal } | undefined): boolean {
@@ -507,7 +596,7 @@ function mapGeneratedAssetsToScenes(
     if (!sceneId) {
       continue;
     }
-    generatedMap[`${generatedItem.id}:${asset.id}:image`] = sceneId;
+    generatedMap[`${generatedItem.id}:${asset.id}:${asset.mediaType}`] = sceneId;
   }
   return generatedMap;
 }
@@ -571,6 +660,30 @@ function parseRunningHubPromptJobs(value: unknown): Array<{ media: PromptMediaIn
     const [media] = parsePromptMedia([record.media]);
     return { media, prompt };
   });
+}
+
+function parseRunningHubVideoJob(value: unknown): { sourceVideo: PromptMediaInput & { videoPath: string }; generatedImage: PromptMediaInput & { generatedImagePath: string }; prompt: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Video generation requires one source video, one generated image, and a prompt.");
+  }
+  const record = value as Record<string, unknown>;
+  const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
+  if (!prompt) {
+    throw new Error("Video generation requires a non-empty prompt.");
+  }
+  const [sourceVideo] = parsePromptMedia([record.sourceVideo]);
+  const [generatedImage] = parsePromptMedia([record.generatedImage]);
+  if (!sourceVideo.videoPath) {
+    throw new Error("Video generation source media must include a video path.");
+  }
+  if (!generatedImage.generatedImagePath) {
+    throw new Error("Video generation requires a generated image path.");
+  }
+  return {
+    sourceVideo: { ...sourceVideo, videoPath: sourceVideo.videoPath },
+    generatedImage: { ...generatedImage, generatedImagePath: generatedImage.generatedImagePath },
+    prompt
+  };
 }
 
 function parseRunningHubGenerationBatch(batchPositionValue: unknown, batchTotalValue: unknown, jobsLength: number): { batchPosition: number; batchTotal: number } {

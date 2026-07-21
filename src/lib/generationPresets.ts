@@ -1,6 +1,6 @@
 import type { RunningHubBinding } from "./studioBindings";
 
-export type StudioActionType = "text" | "image";
+export type StudioActionType = "text" | "image" | "video";
 
 export type RunningHubWorkflowPreset = {
   id: string;
