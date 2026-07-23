@@ -12,6 +12,18 @@ import {
 import * as runningHub from "./runningHub";
 
 describe("buildRunningHubCreatePayload", () => {
+  it("forwards the selected Standard instance type", () => {
+    const payload = buildRunningHubCreatePayload({
+      apiKey: "rh_api_key",
+      workflowId: "workflow",
+      instanceType: "standard",
+      bindings: [{ nodeId: "6", fieldName: "text", studioId: "2" }],
+      fieldValues: new Map([["2", "A cinematic scene"]])
+    });
+
+    expect(payload.instanceType).toBe("standard");
+  });
+
   it("builds workflow overrides from any configured Studio ID binding", () => {
     const payload = buildRunningHubCreatePayload({
       apiKey: "rh_api_key",

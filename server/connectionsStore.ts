@@ -192,7 +192,7 @@ export class ConnectionsStore {
 export function getRunningHubWorkflows(connections: PrivateConnections): RunningHubWorkflowPreset[] {
   if (connections.runningHubWorkflows !== undefined) return normalizeRunningHubWorkflows(connections.runningHubWorkflows);
   if (!connections.runningHubWorkflowId?.trim()) return [];
-  return [{ id: "rh-legacy-01", displayId: "RH01", workflowId: connections.runningHubWorkflowId.trim(), bindings: normalizeRunningHubBindings(connections.runningHubBindings).length ? normalizeRunningHubBindings(connections.runningHubBindings) : legacyRunningHubBindings(connections) }];
+  return [{ id: "rh-legacy-01", displayId: "RH01", workflowId: connections.runningHubWorkflowId.trim(), instanceType: "plus", bindings: normalizeRunningHubBindings(connections.runningHubBindings).length ? normalizeRunningHubBindings(connections.runningHubBindings) : legacyRunningHubBindings(connections) }];
 }
 
 export function getOllamaPresets(connections: PrivateConnections): OllamaPreset[] {
@@ -204,7 +204,20 @@ export function getOllamaPresets(connections: PrivateConnections): OllamaPreset[
 }
 
 function normalizeRunningHubWorkflows(items: RunningHubWorkflowPreset[]): RunningHubWorkflowPreset[] {
-  return items.flatMap((item) => typeof item?.id === "string" && typeof item.displayId === "string" ? [{ id: item.id.trim(), displayId: item.displayId.trim(), workflowId: typeof item.workflowId === "string" ? item.workflowId.trim() : "", bindings: normalizeRunningHubWorkflowBindings(item.bindings) }] : []);
+  return items.flatMap((item) => {
+    if (typeof item?.id !== "string" || typeof item.displayId !== "string") return [];
+    const hasInstanceType = Object.prototype.hasOwnProperty.call(item, "instanceType");
+    const instanceType = item.instanceType === "standard" || item.instanceType === "plus"
+      ? item.instanceType
+      : hasInstanceType ? "" : "plus";
+    return [{
+      id: item.id.trim(),
+      displayId: item.displayId.trim(),
+      workflowId: typeof item.workflowId === "string" ? item.workflowId.trim() : "",
+      instanceType,
+      bindings: normalizeRunningHubWorkflowBindings(item.bindings)
+    }];
+  });
 }
 
 function normalizeRunningHubWorkflowBindings(value: unknown): RunningHubBinding[] {

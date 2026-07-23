@@ -372,6 +372,23 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("getEditableRunningHubBindings(workflow.bindings)");
   });
 
+  it("places a styled per-workflow RunningHub instance selector beside a 20%-width workflow ID", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const cssSource = readFileSync("src/App.css", "utf8");
+
+    expect(appSource).toContain('instanceType: ""');
+    expect(appSource).toContain('className="runninghub-workflow-settings"');
+    expect(appSource).toContain('className="runninghub-instance-type-select"');
+    expect(appSource).toContain('<option value="">Не выбрано</option>');
+    expect(appSource).toContain('<option value="standard">Standard</option>');
+    expect(appSource).toContain('<option value="plus">Plus</option>');
+    expect(appSource).toContain("instanceType: event.target.value as RunningHubInstanceType");
+    expect(cssSource).toContain("grid-template-columns: 20% minmax(160px, 220px);");
+    expect(cssSource).toContain(".runninghub-instance-type-select {");
+    expect(cssSource).toContain("appearance: none;");
+    expect(cssSource).toContain("background-color: #fffdf8;");
+  });
+
   it("shows only explicitly added generation actions and lets their list grow", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const cssSource = readFileSync("src/App.css", "utf8");

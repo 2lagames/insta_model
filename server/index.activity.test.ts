@@ -174,6 +174,20 @@ describe("image prompt activity", () => {
     expect(videoRoute).toContain("prompt: job.prompt");
   });
 
+  it("requires and forwards the selected RunningHub instance type for image and video workflows", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+    const imageRouteStart = source.indexOf('app.post("/api/generation/images"');
+    const videoRouteStart = source.indexOf('app.post("/api/generation/videos"');
+    const cancelRouteStart = source.indexOf('app.post("/api/generation/cancel"');
+    const imageRoute = source.slice(imageRouteStart, videoRouteStart);
+    const videoRoute = source.slice(videoRouteStart, cancelRouteStart);
+
+    expect(imageRoute).toContain("instanceType: requireRunningHubInstanceType(workflow)");
+    expect(videoRoute).toContain("instanceType: requireRunningHubInstanceType(workflow)");
+    expect(source).toContain("function requireRunningHubInstanceType(workflow: RunningHubWorkflowPreset)");
+    expect(source).toContain("Выберите Standard или Plus для workflow ${workflow.displayId} в настройках RunningHub.");
+  });
+
   it("exposes one cancellation route for active generation work", () => {
     const source = readFileSync("server/index.ts", "utf8");
 

@@ -260,6 +260,32 @@ describe("ConnectionsStore", () => {
     });
   });
 
+  it("migrates legacy workflows to Plus and preserves explicit instance selections", async () => {
+    const store = new ConnectionsStore(tempDir);
+    await store.save({
+      runningHubWorkflows: [
+        { id: "rh-legacy", displayId: "RH01", workflowId: "workflow-legacy", bindings: [] },
+        { id: "rh-standard", displayId: "RH02", workflowId: "workflow-standard", instanceType: "standard", bindings: [] },
+        { id: "rh-new", displayId: "RH03", workflowId: "workflow-new", instanceType: "", bindings: [] }
+      ]
+    } as Parameters<ConnectionsStore["save"]>[0]);
+
+    await expect(store.readPublic()).resolves.toMatchObject({
+      runningHubWorkflows: [
+        { id: "rh-legacy", instanceType: "plus" },
+        { id: "rh-standard", instanceType: "standard" },
+        { id: "rh-new", instanceType: "" }
+      ]
+    });
+    await expect(store.readPrivate()).resolves.toMatchObject({
+      runningHubWorkflows: [
+        { id: "rh-legacy", instanceType: "plus" },
+        { id: "rh-standard", instanceType: "standard" },
+        { id: "rh-new", instanceType: "" }
+      ]
+    });
+  });
+
   it("persists a video generation action with its RunningHub workflow", async () => {
     const store = new ConnectionsStore(tempDir);
     await store.save({

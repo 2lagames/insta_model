@@ -12,7 +12,7 @@ import { generateFirstFrameWithFfmpeg, importInstagramUrl } from "./instagramImp
 import { resolveImportMetadataPath } from "./localMetadata";
 import { generateOllamaPrompt, listOllamaModels } from "./ollamaClient";
 import { getOllamaConfigurationForPreset } from "./ollamaConfiguration";
-import type { OllamaPreset, RunningHubWorkflowPreset, StudioActionButton } from "../src/lib/generationPresets";
+import type { OllamaPreset, RunningHubInstanceType, RunningHubWorkflowPreset, StudioActionButton } from "../src/lib/generationPresets";
 import { GenerationCancelledError, GenerationController, type GenerationOperation } from "./generationController";
 import { cancelRunningHubTask, runRunningHubImageGeneration, runRunningHubVideoGeneration } from "./runningHub";
 
@@ -354,6 +354,7 @@ app.post("/api/generation/images", async (request, response) => {
       config: {
         apiKey: connections.runningHubApiKey ?? "",
         workflowId: workflow.workflowId,
+        instanceType: requireRunningHubInstanceType(workflow),
         bindings: workflow.bindings
       },
       jobs: jobs.map((job) => ({
@@ -416,6 +417,7 @@ app.post("/api/generation/videos", async (request, response) => {
       config: {
         apiKey: connections.runningHubApiKey ?? "",
         workflowId: workflow.workflowId,
+        instanceType: requireRunningHubInstanceType(workflow),
         bindings: workflow.bindings
       },
       jobs: [{
@@ -541,6 +543,13 @@ function optionalString(value: unknown): string | undefined {
 function requiredString(value: unknown, message: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(message);
   return value.trim();
+}
+
+function requireRunningHubInstanceType(workflow: RunningHubWorkflowPreset): Exclude<RunningHubInstanceType, ""> {
+  if (workflow.instanceType === "standard" || workflow.instanceType === "plus") {
+    return workflow.instanceType;
+  }
+  throw new Error(`Выберите Standard или Plus для workflow ${workflow.displayId} в настройках RunningHub.`);
 }
 
 function parsePresetArray<T>(value: unknown): T[] | undefined {

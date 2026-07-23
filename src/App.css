@@ -621,6 +621,59 @@ input {
 .preset-card-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .preset-card-header h3 { margin: 0; }
 
+.runninghub-workflow-settings {
+  display: grid;
+  grid-template-columns: 20% minmax(160px, 220px);
+  justify-content: start;
+  align-items: end;
+  gap: 12px;
+}
+
+.runninghub-workflow-settings label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.runninghub-workflow-settings span {
+  color: #6c6257;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.runninghub-instance-type-select {
+  width: 100%;
+  height: 42px;
+  appearance: none;
+  border: 1px solid #c9c4ba;
+  border-radius: 8px;
+  padding: 0 38px 0 12px;
+  background-color: #fffdf8;
+  background-image: linear-gradient(45deg, transparent 50%, #6c6257 50%), linear-gradient(135deg, #6c6257 50%, transparent 50%);
+  background-position: calc(100% - 16px) 18px, calc(100% - 11px) 18px;
+  background-repeat: no-repeat;
+  background-size: 5px 5px, 5px 5px;
+  color: #161616;
+  cursor: pointer;
+  font: inherit;
+}
+
+.runninghub-instance-type-select:hover,
+.runninghub-instance-type-select:focus-visible {
+  border-color: #2c2a26;
+}
+
+.runninghub-instance-type-select:focus-visible {
+  outline: 2px solid rgba(31, 95, 135, 0.2);
+  outline-offset: 1px;
+}
+
+.runninghub-instance-type-select option {
+  background: #fffdf8;
+  color: #161616;
+}
+
 .ollama-preset-layout {
   grid-template-columns: minmax(220px, 0.2fr) minmax(0, 0.8fr);
   align-items: stretch;
@@ -915,6 +968,10 @@ input {
   }
 
   .ollama-preset-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .runninghub-workflow-settings {
     grid-template-columns: 1fr;
   }
 

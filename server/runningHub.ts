@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
+import type { RunningHubInstanceType } from "../src/lib/generationPresets";
 import type { ImportAsset, ImportItem } from "../src/lib/importTypes";
 import { assertUniqueRunningHubBindings, normalizeRunningHubBindings, type RunningHubBinding, type StudioId } from "../src/lib/studioBindings";
 
@@ -10,9 +11,12 @@ const defaultRunningHubBaseUrl = process.env.RUNNINGHUB_API_BASE_URL ?? "https:/
 const defaultPollIntervalMs = Number(process.env.RUNNINGHUB_POLL_INTERVAL_MS ?? 5_000);
 const defaultMaxPolls = Number(process.env.RUNNINGHUB_MAX_POLLS ?? 360);
 
+type RunningHubExecutionType = Exclude<RunningHubInstanceType, "">;
+
 export type RunningHubConfig = {
   apiKey: string;
   workflowId: string;
+  instanceType?: RunningHubExecutionType;
   bindings?: RunningHubBinding[];
   promptNodeId?: string;
   promptFieldName?: string;
@@ -32,7 +36,7 @@ export type RunningHubPromptJob = {
 export type RunningHubCreatePayload = {
   apiKey: string;
   workflowId: string;
-  instanceType: "plus";
+  instanceType: RunningHubExecutionType;
   nodeInfoList: Array<{
     nodeId: string;
     fieldName: string;
@@ -64,6 +68,7 @@ type RunningHubGenerationOptions = {
 export function buildRunningHubCreatePayload(input: {
   apiKey: string;
   workflowId: string;
+  instanceType?: RunningHubExecutionType;
   bindings?: RunningHubBinding[];
   fieldValues?: Map<string, string>;
   promptNodeId?: string;
@@ -81,7 +86,7 @@ export function buildRunningHubCreatePayload(input: {
   return {
     apiKey: input.apiKey,
     workflowId: input.workflowId,
-    instanceType: "plus",
+    instanceType: input.instanceType ?? "plus",
     nodeInfoList: bindings.map((binding) => ({
       nodeId: binding.nodeId,
       fieldName: binding.fieldName,
@@ -289,6 +294,7 @@ async function createTask(options: {
   const payload = buildRunningHubCreatePayload({
     apiKey: options.config.apiKey,
     workflowId: options.config.workflowId,
+    instanceType: options.config.instanceType,
     bindings: options.bindings,
     fieldValues: options.fieldValues
   });
