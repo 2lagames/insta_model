@@ -91,7 +91,8 @@ describe("studio preview layout", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const cssSource = readFileSync("src/App.css", "utf8");
 
-    expect(appSource).toContain("<textarea disabled={isBusy} rows={8}");
+    expect(appSource).toContain("<textarea rows={8}");
+    expect(appSource).not.toContain("<textarea disabled={isBusy} rows={8}");
     expect(cssSource).toContain(".prompt-editors textarea {\n  height: calc(8 * 1.45em + 22px);");
     expect(cssSource).toContain("overflow-y: auto;");
     expect(cssSource).toContain("resize: vertical;");
@@ -172,11 +173,12 @@ describe("studio preview layout", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
 
     expect(appSource).toContain("createPromptTextRecord");
+    expect(appSource).toContain("createPromptPrefixRecord");
     expect(appSource).toContain("promptAutosaveRevisionRef");
     expect(appSource).toContain("isPromptAutosaveReadyRef");
     expect(appSource).toContain("window.setTimeout");
     expect(appSource).toContain("window.setTimeout(attemptAutosave, 600)");
-    expect(appSource).toContain("saveSessionPrompts(prompts)");
+    expect(appSource).toContain("saveSessionPrompts(prompts, promptPrefixes)");
     expect(appSource.match(/promptAutosaveRevisionRef\.current \+= 1/g)?.length).toBeGreaterThanOrEqual(3);
     expect(appSource.match(/isPromptAutosaveReadyRef\.current = true/g)?.length).toBeGreaterThanOrEqual(4);
   });
@@ -188,7 +190,7 @@ describe("studio preview layout", () => {
 
     expect(autosave).toContain("if (!tryBeginSessionMutation()) {");
     expect(autosave).toContain("retryTimeout = window.setTimeout(attemptAutosave, 100)");
-    expect(autosave).toContain("void saveSessionPrompts(prompts)");
+    expect(autosave).toContain("void saveSessionPrompts(prompts, promptPrefixes)");
     expect(autosave).toContain(".finally(() => {");
     expect(autosave).toContain("endSessionMutation();");
     expect(autosave).toContain("if (revision !== promptAutosaveRevisionRef.current) {");
@@ -203,10 +205,10 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("toggleAllMediaSelection(current, sourceMaterials.map((material) => material.id))");
     expect(appSource).toContain('hasEveryMaterialSelected ? "Снять выделение" : "Выбрать все"');
     expect(appSource).toContain("setSelectedForGeneration([])");
-    expect(appSource).toContain("Generate prompts with a text action before image generation.");
+    expect(appSource).toContain("createRunningHubGenerationJobs");
   });
 
-  it("offers a screenshot control above source media selection", () => {
+  it("shows the selected media type in Preview and enables screenshots only for video", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const previewStart = appSource.indexOf("function Preview({");
     const preview = appSource.slice(previewStart, appSource.indexOf("function GenerationWorkspace", previewStart));
@@ -214,7 +216,8 @@ describe("studio preview layout", () => {
     const mediaSelector = appSource.slice(mediaSelectorStart, appSource.indexOf("function PromptEditors", mediaSelectorStart));
 
     expect(preview).toContain("onCaptureScreenshot=");
-    expect(preview).toContain("canCaptureScreenshot={Boolean(selected?.files.video)}");
+    expect(preview).toContain('selected?.mediaType === "video" && selected.files.video');
+    expect(preview).toContain('canCaptureScreenshot={selected?.mediaType === "video" && Boolean(selected.files.video)}');
     expect(mediaSelector).toContain(">Скриншот</button>");
     expect(mediaSelector.indexOf(">Скриншот</button>")).toBeLessThan(mediaSelector.indexOf('"Снять выделение" : "Выбрать все"'));
   });
@@ -234,17 +237,19 @@ describe("studio preview layout", () => {
     expect(screenshotHandler).toContain("uploadLocalImage(file, { appendToSession: true })");
   });
 
-  it("regenerates selected prompts even when a prompt already exists", () => {
+  it("appends every generated prompt to the latest prompt document", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const promptCreationStart = appSource.indexOf("async function createSelectedPrompts");
     const promptCreation = appSource.slice(promptCreationStart, appSource.indexOf("async function handleGenerateImagePrompts", promptCreationStart));
 
     expect(promptCreation).toContain("for (const media of selectedPromptMedia)");
     expect(promptCreation).not.toContain("missingPromptMedia");
-    expect(promptCreation).toContain("mergePromptDocuments(current, [prompt])");
+    expect(promptCreation).toContain("appendPromptDocument");
+    expect(promptCreation).toContain("promptDocumentsRef.current");
+    expect(promptCreation).not.toContain("mergePromptDocuments(current, [prompt])");
   });
 
-  it("offers a video action for one checked source video and generated image", () => {
+  it("builds video inputs from the selected workflow bindings", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const videoHandlerStart = appSource.indexOf("async function handleGenerateVideos");
     const videoHandler = appSource.slice(videoHandlerStart, appSource.indexOf("function handleCancelGeneration", videoHandlerStart));
@@ -252,10 +257,19 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("＋ Видео");
     expect(appSource).toContain('if (studioId === "2") return "2 · Prompt image"');
     expect(appSource).toContain('if (studioId === "5") return "5 · Prompt video"');
-    expect(videoHandler).toContain("media.mediaType === \"video\"");
-    expect(videoHandler).toContain("generatedMaterials.filter");
+    expect(videoHandler).toContain("createRunningHubGenerationJobs");
     expect(videoHandler).toContain("generateVideosWithOptions");
-    expect(videoHandler).toContain("Select exactly one source video and one generated image before video generation.");
+    expect(videoHandler).not.toContain("Select exactly one source video and one generated image before video generation.");
+    expect(videoHandler).not.toContain("Write or generate a prompt for the selected source video before video generation.");
+  });
+
+  it("builds image inputs from the selected workflow bindings", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const imageHandlerStart = appSource.indexOf("async function handleGenerateImages");
+    const imageHandler = appSource.slice(imageHandlerStart, appSource.indexOf("async function handleGenerateVideos", imageHandlerStart));
+
+    expect(imageHandler).toContain("createRunningHubGenerationJobs");
+    expect(imageHandler).not.toContain("Write or generate a prompt for every selected Media item before image generation.");
   });
 
   it("shows a cancellation action in the generation workspace and uses IMAGE labels", () => {
@@ -290,7 +304,7 @@ describe("studio preview layout", () => {
     const generationWorkspace = appSource.slice(generationWorkspaceStart, appSource.indexOf("function MediaSelector", generationWorkspaceStart));
 
     expect(appSource).toContain("const [imageGenerationsPerMedia, setImageGenerationsPerMedia] = useState(1);");
-    expect(generationHandler).toContain("repeatImageGenerationJobs(promptImageJobs, imageGenerationsPerMedia)");
+    expect(generationHandler).toContain("repeatImageGenerationJobs(workflowJobs, imageGenerationsPerMedia)");
     expect(generationWorkspace).toContain('className="studio-action-select"');
     expect(generationWorkspace).toContain('aria-label="Количество генераций на изображение"');
     expect(generationWorkspace).toContain("Array.from({ length: 10 }");
@@ -311,7 +325,7 @@ describe("studio preview layout", () => {
     expect(uploadHandler.indexOf("setCurrentSession(imported.session)")).toBeLessThan(uploadHandler.indexOf("} catch"));
   });
 
-  it("locks prompt editors while any persistent session mutation is running", () => {
+  it("keeps prompt text editable while locking its persistent actions", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const promptEditorsStart = appSource.indexOf("function PromptEditors({");
     const promptEditors = appSource.slice(promptEditorsStart);
@@ -321,6 +335,64 @@ describe("studio preview layout", () => {
     expect(promptEditors).toContain("disabled={isBusy || document.historyIndex === 0}");
     expect(promptEditors).toContain("disabled={isBusy || document.historyIndex === document.history.length - 1}");
     expect(promptEditors).toContain("disabled={isBusy}");
+    expect(promptEditors).not.toContain("<textarea disabled={isBusy}");
+  });
+
+  it("creates a prompt editor for the selected Media item independently of Use", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const previewStart = appSource.indexOf("function Preview({");
+    const preview = appSource.slice(previewStart, appSource.indexOf("function parseGenerationPrefixes", previewStart));
+
+    expect(appSource).toContain("ensurePromptDocument");
+    expect(appSource).toContain("selectedMedia");
+    expect(preview).toContain("selected?.id");
+    expect(preview).toContain("selectedForGeneration");
+  });
+
+  it("applies and removes Generation workspace substitutions in existing prompts", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const handlerStart = appSource.indexOf("function handleChangeGenerationPrefix");
+    const handler = appSource.slice(handlerStart, appSource.indexOf("async function handleSaveGenerationPrefixes", handlerStart));
+
+    expect(handler).toContain("setPromptDocumentPrefix");
+    expect(handler).toContain("generationPrefixSelection");
+    expect(handler).toContain("setGenerationPrefixSelection");
+    expect(appSource).toContain("onChangePrefix={handleChangeGenerationPrefix}");
+  });
+
+  it("persists Generation workspace selection changes in order", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const queueStart = appSource.indexOf("function queueGenerationPrefixSelectionSave");
+    const queue = appSource.slice(queueStart, appSource.indexOf("async function handleSaveGenerationPrefixes", queueStart));
+    const handlerStart = appSource.indexOf("function handleChangeGenerationPrefix");
+    const handler = appSource.slice(handlerStart, appSource.indexOf("function queueGenerationPrefixSelectionSave", handlerStart));
+
+    expect(appSource).toContain("const generationPrefixSaveQueueRef = useRef<Promise<void>>(Promise.resolve());");
+    expect(handler).toContain("queueGenerationPrefixSelectionSave(nextSelection)");
+    expect(queue).toContain("generationPrefixSaveQueueRef.current.then");
+    expect(queue).toContain("saveConnections({ generationPrefixSelection: selection })");
+  });
+
+  it("does not reapply a managed substitution whenever Media selection changes", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const effectStart = appSource.indexOf("if (!selectedMedia) {");
+    const selectedMediaEffect = appSource.slice(effectStart, appSource.indexOf("useEffect(() => {", effectStart));
+
+    expect(selectedMediaEffect).toContain("ensurePromptDocument");
+    expect(selectedMediaEffect).not.toContain("setPromptDocumentPrefix");
+  });
+
+  it("delegates prompt requirements to the selected RunningHub workflow bindings", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const imageStart = appSource.indexOf("async function handleGenerateImages");
+    const imageHandler = appSource.slice(imageStart, appSource.indexOf("async function handleGenerateVideos", imageStart));
+    const videoStart = appSource.indexOf("async function handleGenerateVideos");
+    const videoHandler = appSource.slice(videoStart, appSource.indexOf("function handleCancelGeneration", videoStart));
+
+    expect(imageHandler).toContain("bindings: workflow.bindings");
+    expect(videoHandler).toContain("bindings: workflow.bindings");
+    expect(imageHandler).not.toContain("Write or generate a prompt");
+    expect(videoHandler).not.toContain("Write or generate a prompt");
   });
 
   it("serializes every persistent session mutation, including resets and manual prompt saves", () => {

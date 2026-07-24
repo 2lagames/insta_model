@@ -137,21 +137,19 @@ describe("generateImages", () => {
 describe("generateVideos", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("posts a checked source video, generated image, and video prompt to the dedicated endpoint", async () => {
+  it("posts workflow-driven jobs without adding prompt or generated image fields", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
       item: { id: "generated-video-1", assets: [], files: {}, status: "ready", mediaType: "video", createdAt: "2026-07-20", sourceUrl: "runninghub://task-video" },
       session: { itemIds: ["generated-video-1"], sceneBibles: [], mediaSceneMap: {} }
     })));
     const sourceVideo = { id: "reel:video", label: "Reel", imagePath: "/input/frame.jpg", videoPath: "/input/reel.mp4", sourceKind: "video-first-frame" as const };
-    const generatedImage = { id: "generated:image", label: "Generated image", imagePath: "/output/image.png", generatedImagePath: "/output/image.png", sourceKind: "photo" as const };
-    const job: { sourceVideo: typeof sourceVideo; generatedImage: typeof generatedImage; prompt: string } = { sourceVideo, generatedImage, prompt: "Animate the scene" };
+    const jobs = [{ media: sourceVideo }];
 
-    await (api as typeof api & { generateVideosWithOptions: (job: { sourceVideo: typeof sourceVideo; generatedImage: typeof generatedImage; prompt: string }, options: { runningHubWorkflowPresetId: string }) => Promise<unknown> })
-      .generateVideosWithOptions(job, { runningHubWorkflowPresetId: "rh-video" });
+    await api.generateVideosWithOptions(jobs, { runningHubWorkflowPresetId: "rh-video" });
 
     expect(fetchSpy).toHaveBeenCalledWith("/api/generation/videos", expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ job, runningHubWorkflowPresetId: "rh-video" })
+      body: JSON.stringify({ jobs, runningHubWorkflowPresetId: "rh-video" })
     }));
   });
 });
@@ -290,13 +288,19 @@ describe("imports session API", () => {
       session: { itemIds: ["post-1"], sceneBibles: [], mediaSceneMap: {}, promptTexts: { "post-1:image": "saved" } }
     })));
 
-    await expect(saveSessionPrompts({ "post-1:image": "saved" })).resolves.toMatchObject({
+    await expect(saveSessionPrompts(
+      { "post-1:image": "Кристина\nsaved" },
+      { "post-1:image": "Кристина" }
+    )).resolves.toMatchObject({
       promptTexts: { "post-1:image": "saved" }
     });
     expect(fetchSpy).toHaveBeenCalledWith("/api/imports/session/prompts", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompts: { "post-1:image": "saved" } })
+      body: JSON.stringify({
+        prompts: { "post-1:image": "Кристина\nsaved" },
+        promptPrefixes: { "post-1:image": "Кристина" }
+      })
     });
   });
 

@@ -80,7 +80,8 @@ describe("ImportStore", () => {
       itemIds: ["old"],
       sceneBibles: [],
       mediaSceneMap: {},
-      promptTexts: { "old:image": "saved" }
+      promptTexts: { "old:image": "saved" },
+      promptPrefixes: { "old:image": "Кристина" }
     });
 
     await store.startCurrentSession("local-1");
@@ -90,24 +91,27 @@ describe("ImportStore", () => {
       itemIds: ["local-1"],
       sceneBibles: [],
       mediaSceneMap: {},
-      promptTexts: {}
+      promptTexts: {},
+      promptPrefixes: {}
     });
 
     await store.writeCurrentSession({
       itemIds: ["local-1"],
       sceneBibles: [],
       mediaSceneMap: {},
-      promptTexts: { "local-1:image": "final prompt" }
+      promptTexts: { "local-1:image": "final prompt" },
+      promptPrefixes: { "local-1:image": "Кристина" }
     });
     await store.appendToCurrentSession("generated-1");
 
     await expect(store.readCurrentSession()).resolves.toMatchObject({
       itemIds: ["local-1", "generated-1"],
-      promptTexts: { "local-1:image": "final prompt" }
+      promptTexts: { "local-1:image": "final prompt" },
+      promptPrefixes: { "local-1:image": "Кристина" }
     });
 
     await store.resetCurrentSession();
-    await expect(store.readCurrentSession()).resolves.toMatchObject({ promptTexts: {} });
+    await expect(store.readCurrentSession()).resolves.toMatchObject({ promptTexts: {}, promptPrefixes: {} });
   });
 
   it("finds the newest ready import for an Instagram URL", async () => {

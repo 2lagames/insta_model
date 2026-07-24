@@ -54,7 +54,7 @@ app.get("/api/health", (_request, response) => {
   response.json({
     ok: true,
     importProvider: "apify",
-    version: "0.10.0"
+    version: "0.11.0"
   });
 });
 
@@ -245,10 +245,12 @@ app.post("/api/imports/session/reset", async (_request, response) => {
 app.put("/api/imports/session/prompts", async (request, response) => {
   try {
     const prompts = parsePromptTexts(request.body?.prompts);
+    const promptPrefixes = parsePromptTexts(request.body?.promptPrefixes);
     const currentSession = await store.readCurrentSession();
     const session = {
       ...currentSession,
-      promptTexts: { ...(currentSession.promptTexts ?? {}), ...prompts }
+      promptTexts: { ...(currentSession.promptTexts ?? {}), ...prompts },
+      promptPrefixes: { ...(currentSession.promptPrefixes ?? {}), ...promptPrefixes }
     };
     await store.writeCurrentSession(session);
     response.json({ session });
@@ -335,7 +337,7 @@ app.post("/api/generation/image-prompts", async (request, response) => {
 app.post("/api/generation/images", async (request, response) => {
   let generation: GenerationOperation | undefined;
   try {
-    const jobs = parseRunningHubPromptJobs(request.body?.jobs);
+    const jobs = parseRunningHubGenerationJobs(request.body?.jobs);
     const batch = parseRunningHubGenerationBatch(request.body?.batchPosition, request.body?.batchTotal, jobs.length);
     const activeGeneration = generationController.start();
     generation = activeGeneration;
@@ -360,9 +362,9 @@ app.post("/api/generation/images", async (request, response) => {
       jobs: jobs.map((job) => ({
         mediaId: job.media.id,
         label: job.media.label,
-        imagePath: job.media.generatedImagePath ? undefined : resolveStudioMediaPath(job.media.imagePath),
+        imagePath: resolveStudioMediaPath(job.media.imagePath),
         videoPath: job.media.videoPath ? resolveStudioMediaPath(job.media.videoPath) : undefined,
-        generatedImagePath: job.media.generatedImagePath ? resolveStudioMediaPath(job.media.generatedImagePath) : undefined,
+        generatedImagePath: resolveRunningHubGeneratedImagePath(job),
         prompt: job.prompt
       })),
       onStatus: (event) => activityLog.publish(event),
@@ -403,7 +405,7 @@ app.post("/api/generation/images", async (request, response) => {
 app.post("/api/generation/videos", async (request, response) => {
   let generation: GenerationOperation | undefined;
   try {
-    const job = parseRunningHubVideoJob(request.body?.job);
+    const jobs = parseRunningHubGenerationJobs(request.body?.jobs);
     const activeGeneration = generationController.start();
     generation = activeGeneration;
     const connections = await connectionsStore.readPrivate();
@@ -420,13 +422,14 @@ app.post("/api/generation/videos", async (request, response) => {
         instanceType: requireRunningHubInstanceType(workflow),
         bindings: workflow.bindings
       },
-      jobs: [{
-        mediaId: job.sourceVideo.id,
-        label: job.sourceVideo.label,
-        videoPath: resolveStudioMediaPath(job.sourceVideo.videoPath),
-        generatedImagePath: resolveStudioMediaPath(job.generatedImage.generatedImagePath),
+      jobs: jobs.map((job) => ({
+        mediaId: job.media.id,
+        label: job.media.label,
+        imagePath: resolveStudioMediaPath(job.media.imagePath),
+        videoPath: job.media.videoPath ? resolveStudioMediaPath(job.media.videoPath) : undefined,
+        generatedImagePath: resolveRunningHubGeneratedImagePath(job),
         prompt: job.prompt
-      }],
+      })),
       onStatus: (event) => activityLog.publish(event),
       signal: activeGeneration.signal,
       onTaskCreated: (taskId) => activeGeneration.registerRunningHubTask({
@@ -440,7 +443,7 @@ app.post("/api/generation/videos", async (request, response) => {
       sceneBibles: currentSession.sceneBibles,
       mediaSceneMap: {
         ...currentSession.mediaSceneMap,
-        ...mapGeneratedAssetsToScenes(runningHubResult.item, runningHubResult.assets, [job.sourceVideo], currentSession.mediaSceneMap)
+        ...mapGeneratedAssetsToScenes(runningHubResult.item, runningHubResult.assets, jobs.map((job) => job.media), currentSession.mediaSceneMap)
       }
     });
     response.json({ item: runningHubResult.item, session: await store.readCurrentSession() });
@@ -652,47 +655,40 @@ function parsePromptTexts(value: unknown): Record<string, string> {
   return prompts;
 }
 
-function parseRunningHubPromptJobs(value: unknown): Array<{ media: PromptMediaInput; prompt: string }> {
+type ParsedRunningHubGenerationJob = {
+  media: PromptMediaInput;
+  generatedImage?: PromptMediaInput;
+  prompt?: string;
+};
+
+function parseRunningHubGenerationJobs(value: unknown): ParsedRunningHubGenerationJob[] {
   if (!Array.isArray(value) || value.length === 0) {
-    throw new Error("Image generation requires at least one media and prompt job.");
+    throw new Error("RunningHub generation requires at least one media job.");
   }
 
   return value.map((item, index) => {
     if (!item || typeof item !== "object") {
-      throw new Error(`Image generation job ${index + 1} is invalid.`);
+      throw new Error(`RunningHub generation job ${index + 1} is invalid.`);
     }
     const record = item as Record<string, unknown>;
-    const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
-    if (!prompt) {
-      throw new Error(`Image generation job ${index + 1} must include a non-empty prompt.`);
-    }
     const [media] = parsePromptMedia([record.media]);
-    return { media, prompt };
+    const prompt = typeof record.prompt === "string" && record.prompt.trim()
+      ? record.prompt.trim()
+      : undefined;
+    const [generatedImage] = record.generatedImage === undefined
+      ? []
+      : parsePromptMedia([record.generatedImage]);
+    return {
+      media,
+      ...(generatedImage ? { generatedImage } : {}),
+      ...(prompt ? { prompt } : {})
+    };
   });
 }
 
-function parseRunningHubVideoJob(value: unknown): { sourceVideo: PromptMediaInput & { videoPath: string }; generatedImage: PromptMediaInput & { generatedImagePath: string }; prompt: string } {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Video generation requires one source video, one generated image, and a prompt.");
-  }
-  const record = value as Record<string, unknown>;
-  const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
-  if (!prompt) {
-    throw new Error("Video generation requires a non-empty prompt.");
-  }
-  const [sourceVideo] = parsePromptMedia([record.sourceVideo]);
-  const [generatedImage] = parsePromptMedia([record.generatedImage]);
-  if (!sourceVideo.videoPath) {
-    throw new Error("Video generation source media must include a video path.");
-  }
-  if (!generatedImage.generatedImagePath) {
-    throw new Error("Video generation requires a generated image path.");
-  }
-  return {
-    sourceVideo: { ...sourceVideo, videoPath: sourceVideo.videoPath },
-    generatedImage: { ...generatedImage, generatedImagePath: generatedImage.generatedImagePath },
-    prompt
-  };
+function resolveRunningHubGeneratedImagePath(job: ParsedRunningHubGenerationJob): string | undefined {
+  const generatedImagePath = job.generatedImage?.generatedImagePath ?? job.media.generatedImagePath;
+  return generatedImagePath ? resolveStudioMediaPath(generatedImagePath) : undefined;
 }
 
 function parseRunningHubGenerationBatch(batchPositionValue: unknown, batchTotalValue: unknown, jobsLength: number): { batchPosition: number; batchTotal: number } {

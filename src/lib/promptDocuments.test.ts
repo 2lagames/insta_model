@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendPromptDocument,
   createPromptTextRecord,
   createPromptDocuments,
   editPromptDocument,
+  ensurePromptDocument,
   getCurrentPrompt,
   mergePromptDocuments,
   redoPromptDocument,
   resetPromptDocument,
+  setPromptDocumentPrefix,
   undoPromptDocument,
 } from "./promptDocuments";
 
@@ -23,6 +26,7 @@ describe("prompt documents", () => {
         label: "Image",
         original: "original",
         history: ["original"],
+        managedPrefixes: [""],
         historyIndex: 0,
       },
       {
@@ -30,6 +34,7 @@ describe("prompt documents", () => {
         label: "Video",
         original: "another original",
         history: ["another original"],
+        managedPrefixes: [""],
         historyIndex: 0,
       },
     ]);
@@ -109,5 +114,63 @@ describe("prompt documents", () => {
     expect(getCurrentPrompt(merged.find((document) => document.mediaId === "media-1")!)).toBe("first revised");
     expect(getCurrentPrompt(merged.find((document) => document.mediaId === "media-2")!)).toBe("second regenerated");
     expect(getCurrentPrompt(merged.find((document) => document.mediaId === "media-3")!)).toBe("third generated");
+  });
+
+  it("creates an empty prompt for selected media without replacing an existing prompt", () => {
+    const empty = ensurePromptDocument([], { mediaId: "media-1", label: "Image", prompt: "" });
+    const existing = ensurePromptDocument(empty, { mediaId: "media-1", label: "Changed label", prompt: "replacement" });
+
+    expect(getCurrentPrompt(empty[0])).toBe("");
+    expect(existing).toBe(empty);
+    expect(getCurrentPrompt(existing[0])).toBe("");
+  });
+
+  it("applies, replaces, and removes only the managed prompt prefix", () => {
+    const manual = createPromptDocuments([{ mediaId: "media-1", label: "Image", prompt: "Мой текст" }]);
+    const withKristina = setPromptDocumentPrefix(manual, "", "Текст Кристины");
+    const withOther = setPromptDocumentPrefix(withKristina, "Текст Кристины", "Другой текст");
+    const withoutPrefix = setPromptDocumentPrefix(withOther, "Другой текст", "");
+
+    expect(getCurrentPrompt(withKristina[0])).toBe("Текст Кристины\nМой текст");
+    expect(getCurrentPrompt(withOther[0])).toBe("Другой текст\nМой текст");
+    expect(getCurrentPrompt(withoutPrefix[0])).toBe("Мой текст");
+  });
+
+  it("removes the prefix restored by undo even when the dropdown previously held another prefix", () => {
+    const manual = createPromptDocuments([{ mediaId: "media-1", label: "Image", prompt: "Мой текст" }]);
+    const withKristina = setPromptDocumentPrefix(manual, "", "Текст Кристины");
+    const withOther = setPromptDocumentPrefix(withKristina, "Текст Кристины", "Другой текст");
+    const undone = undoPromptDocument(withOther, "media-1");
+    const withoutPrefix = setPromptDocumentPrefix(undone, "Другой текст", "");
+
+    expect(getCurrentPrompt(undone[0])).toBe("Текст Кристины\nМой текст");
+    expect(getCurrentPrompt(withoutPrefix[0])).toBe("Мой текст");
+  });
+
+  it("appends every generated prompt on a new line without replacing earlier text", () => {
+    const initial = createPromptDocuments([{
+      mediaId: "media-1",
+      label: "Image",
+      prompt: "Текст Кристины\nМой текст",
+    }]);
+    const once = appendPromptDocument(initial, { mediaId: "media-1", label: "Image", prompt: "Первая генерация" });
+    const twice = appendPromptDocument(once, { mediaId: "media-1", label: "Image", prompt: "Вторая генерация" });
+
+    expect(getCurrentPrompt(twice[0])).toBe(
+      "Текст Кристины\nМой текст\nПервая генерация\nВторая генерация",
+    );
+  });
+
+  it("does not add leading, trailing, or blank lines while composing prompts", () => {
+    const empty = createPromptDocuments([{ mediaId: "media-1", label: "Image", prompt: "" }]);
+    const withPrefix = setPromptDocumentPrefix(empty, "", "Текст Кристины\n");
+    const withGenerated = appendPromptDocument(withPrefix, {
+      mediaId: "media-1",
+      label: "Image",
+      prompt: "\nСгенерированный текст\n",
+    });
+
+    expect(getCurrentPrompt(withPrefix[0])).toBe("Текст Кристины");
+    expect(getCurrentPrompt(withGenerated[0])).toBe("Текст Кристины\nСгенерированный текст");
   });
 });

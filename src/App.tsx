@@ -24,16 +24,21 @@ import { validateInstagramUrl } from "./lib/instagramUrl";
 import { createMediaMaterials, createSessionMediaMaterials, type MediaMaterial } from "./lib/mediaMaterials";
 import { toggleAllMediaSelection, toggleMediaSelection } from "./lib/mediaSelection";
 import {
+  appendPromptDocument,
+  createPromptPrefixRecord,
   createPromptTextRecord,
   editPromptDocument,
+  ensurePromptDocument,
   getCurrentPrompt,
   mergePromptDocuments,
   redoPromptDocument,
   resetPromptDocument,
+  setPromptDocumentPrefix,
   undoPromptDocument,
   type PromptDocument
 } from "./lib/promptDocuments";
 import type { PromptMediaInput } from "./lib/promptTypes";
+import { createRunningHubGenerationJobs } from "./lib/runningHubJobs";
 import { createStatusLogText } from "./lib/statusLog";
 import { studioIds, type RunningHubBinding } from "./lib/studioBindings";
 import { nextPresetDisplayId, reorderStudioActionButtons, type OllamaPreset, type RunningHubInstanceType, type RunningHubWorkflowPreset, type StudioActionButton, type StudioActionType } from "./lib/generationPresets";
@@ -113,7 +118,10 @@ export default function App() {
   const [isRefreshingCloudModels, setIsRefreshingCloudModels] = useState(false);
   const [isRefreshingLocalModels, setIsRefreshingLocalModels] = useState(false);
   const [isSavingConnections, setIsSavingConnections] = useState(false);
-  const [promptDocuments, setPromptDocuments] = useState<PromptDocument[]>([]);
+  const [promptDocuments, setPromptDocumentsState] = useState<PromptDocument[]>([]);
+  const promptDocumentsRef = useRef<PromptDocument[]>([]);
+  const selectedGenerationPrefixRef = useRef("");
+  const generationPrefixSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const promptAutosaveRevisionRef = useRef(0);
   const isPromptAutosaveReadyRef = useRef(false);
   const localMediaInputRef = useRef<HTMLInputElement | null>(null);
@@ -121,6 +129,14 @@ export default function App() {
   const isSessionMutationBusyRef = useRef(false);
   const generationAbortControllerRef = useRef<AbortController | null>(null);
   const isSessionMutationBusy = isImporting || isResetting || isSavingPrompt || isGeneratingPrompt || isGeneratingImages || isGeneratingVideos;
+
+  function setPromptDocuments(update: React.SetStateAction<PromptDocument[]>) {
+    const nextDocuments = typeof update === "function"
+      ? (update as (current: PromptDocument[]) => PromptDocument[])(promptDocumentsRef.current)
+      : update;
+    promptDocumentsRef.current = nextDocuments;
+    setPromptDocumentsState(nextDocuments);
+  }
 
   function tryBeginSessionMutation() {
     if (isSessionMutationBusyRef.current) {
@@ -155,6 +171,7 @@ export default function App() {
     () => mediaMaterials.filter((material) => material.importItem.provider === "runninghub"),
     [mediaMaterials]
   );
+  const selectedGenerationPrefix = getGenerationPrefixText(generationPrefixOptions, generationPrefixSelection);
 
   function appendActivityEntry(entry: Omit<ActivityLogEntry, "id" | "createdAt"> & { id?: string; createdAt?: string }) {
     setActivityEntries((current) => [
@@ -217,7 +234,13 @@ export default function App() {
         setItems(loadedSession.items);
         setCurrentSession(loadedSession.session);
         isPromptAutosaveReadyRef.current = true;
-        setPromptDocuments(mergePromptDocuments([], Object.entries(loadedSession.session.promptTexts ?? {}).map(([mediaId, prompt]) => ({ mediaId, label: mediaId, prompt }))));
+        const loadedDocuments = mergePromptDocuments([], Object.entries(loadedSession.session.promptTexts ?? {}).map(([mediaId, prompt]) => ({
+          mediaId,
+          label: mediaId,
+          prompt,
+          managedPrefix: loadedSession.session.promptPrefixes?.[mediaId] ?? ""
+        })));
+        setPromptDocuments(setPromptDocumentPrefix(loadedDocuments, "", selectedGenerationPrefixRef.current));
         const sessionItemIds = loadedSession.session.itemIds;
         const firstSessionItem = sessionItemIds.length > 0
           ? loadedSession.items.find((item) => item.id === sessionItemIds[0])
@@ -241,6 +264,12 @@ export default function App() {
         setStudioActionButtons(loadedConnections.studioActionButtons);
         setGenerationPrefixOptions(loadedConnections.generationPrefixOptions ?? "");
         setGenerationPrefixSelection(loadedConnections.generationPrefixSelection ?? "");
+        const loadedPrefix = getGenerationPrefixText(
+          loadedConnections.generationPrefixOptions ?? "",
+          loadedConnections.generationPrefixSelection ?? ""
+        );
+        selectedGenerationPrefixRef.current = loadedPrefix;
+        setPromptDocuments((current) => setPromptDocumentPrefix(current, "", loadedPrefix));
         if (loadedConnections.hasOllamaCloudApiKey) {
           void refreshOllamaModels("cloud", true);
         }
@@ -253,12 +282,26 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!selectedMedia) {
+      return;
+    }
+
+    setPromptDocuments((current) => ensurePromptDocument(current, {
+      mediaId: selectedMedia.id,
+      label: selectedMedia.label,
+      prompt: selectedGenerationPrefix,
+      managedPrefix: selectedGenerationPrefix
+    }));
+  }, [selectedMedia?.id, selectedGenerationPrefix]);
+
+  useEffect(() => {
     if (!isPromptAutosaveReadyRef.current || promptDocuments.length === 0) {
       return;
     }
 
     const revision = promptAutosaveRevisionRef.current;
     const prompts = createPromptTextRecord(promptDocuments);
+    const promptPrefixes = createPromptPrefixRecord(promptDocuments);
     let retryTimeout: number | undefined;
     const attemptAutosave = () => {
       if (revision !== promptAutosaveRevisionRef.current) {
@@ -270,7 +313,7 @@ export default function App() {
         return;
       }
 
-      void saveSessionPrompts(prompts)
+      void saveSessionPrompts(prompts, promptPrefixes)
         .then((session) => {
           if (revision !== promptAutosaveRevisionRef.current) {
             return;
@@ -331,7 +374,13 @@ export default function App() {
       const importedItem = imported.item;
       isPromptAutosaveReadyRef.current = true;
       setCurrentSession(imported.session);
-      setPromptDocuments(mergePromptDocuments([], Object.entries(imported.session.promptTexts ?? {}).map(([mediaId, prompt]) => ({ mediaId, label: mediaId, prompt }))));
+      const importedDocuments = mergePromptDocuments([], Object.entries(imported.session.promptTexts ?? {}).map(([mediaId, prompt]) => ({
+        mediaId,
+        label: mediaId,
+        prompt,
+        managedPrefix: imported.session.promptPrefixes?.[mediaId] ?? ""
+      })));
+      setPromptDocuments(setPromptDocumentPrefix(importedDocuments, "", selectedGenerationPrefixRef.current));
       setItems((current) => [importedItem, ...current.filter((item) => item.id !== importedItem.id)]);
       const importedMedia = createMediaMaterials(importedItem);
       setSelectedItemId(importedItem.id);
@@ -485,20 +534,24 @@ export default function App() {
   async function createSelectedPrompts(ollamaPresetId: string, signal?: AbortSignal): Promise<Array<{ mediaId: string; label: string; prompt: string }>> {
     const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
     let generatedPrompts: Array<{ mediaId: string; label: string; prompt: string }> = [];
-    const prefix = parseGenerationPrefixes(generationPrefixOptions).find((item) => item.name === generationPrefixSelection)?.text;
     for (const media of selectedPromptMedia) {
       const generated = await generateImagePromptsWithOptions([media], { ollamaPresetId, signal });
       const generatedPrompt = generated.prompts[0];
       if (!generatedPrompt) {
         continue;
       }
+      const nextDocuments = appendPromptDocument(promptDocumentsRef.current, generatedPrompt);
+      const appendedDocument = nextDocuments.find((document) => document.mediaId === generatedPrompt.mediaId)!;
       const prompt = {
         ...generatedPrompt,
-        prompt: prefix ? `${prefix}, ${generatedPrompt.prompt}` : generatedPrompt.prompt
+        prompt: getCurrentPrompt(appendedDocument)
       };
       generatedPrompts.push(prompt);
-      setPromptDocuments((current) => mergePromptDocuments(current, [prompt]));
-      const savedSession = await saveSessionPrompts({ [prompt.mediaId]: prompt.prompt });
+      setPromptDocuments(nextDocuments);
+      const savedSession = await saveSessionPrompts(
+        { [prompt.mediaId]: prompt.prompt },
+        { [prompt.mediaId]: createPromptPrefixRecord(nextDocuments)[prompt.mediaId] ?? "" }
+      );
       setCurrentSession(savedSession);
       setSessionMediaItemIds(savedSession.itemIds);
       setIsMediaSessionReset(false);
@@ -557,7 +610,10 @@ export default function App() {
 
     setIsSavingPrompt(true);
     try {
-      const session = await saveSessionPrompts({ [mediaId]: getCurrentPrompt(document) });
+      const session = await saveSessionPrompts(
+        { [mediaId]: getCurrentPrompt(document) },
+        { [mediaId]: createPromptPrefixRecord(promptDocuments)[mediaId] ?? "" }
+      );
       setCurrentSession(session);
       setSessionMediaItemIds(session.itemIds);
       recordStatus({ tone: "ready", message: "Prompt saved locally." });
@@ -569,12 +625,33 @@ export default function App() {
     }
   }
 
+  function handleChangeGenerationPrefix(nextSelection: string) {
+    const previousPrefix = getGenerationPrefixText(generationPrefixOptions, generationPrefixSelection);
+    const nextPrefix = getGenerationPrefixText(generationPrefixOptions, nextSelection);
+    setPromptDocuments((current) => setPromptDocumentPrefix(current, previousPrefix, nextPrefix));
+    selectedGenerationPrefixRef.current = nextPrefix;
+    setGenerationPrefixSelection(nextSelection);
+    queueGenerationPrefixSelectionSave(nextSelection);
+  }
+
+  function queueGenerationPrefixSelectionSave(selection: string) {
+    generationPrefixSaveQueueRef.current = generationPrefixSaveQueueRef.current.then(async () => {
+      const saved = await saveConnections({ generationPrefixSelection: selection });
+      setConnections(saved);
+    }).catch((error: unknown) => {
+      recordStatus({ tone: "error", message: `Could not save Generation workspace selection: ${toErrorMessage(error)}` });
+    });
+  }
+
   async function handleSaveGenerationPrefixes(value: string) {
     const nextSelection = parseGenerationPrefixes(value).some((item) => item.name === generationPrefixSelection)
       ? generationPrefixSelection
       : "";
+    const previousPrefix = getGenerationPrefixText(generationPrefixOptions, generationPrefixSelection);
+    const nextPrefix = getGenerationPrefixText(value, nextSelection);
 
     try {
+      await generationPrefixSaveQueueRef.current;
       const saved = await saveConnections({
         generationPrefixOptions: value,
         generationPrefixSelection: nextSelection
@@ -582,6 +659,8 @@ export default function App() {
       setConnections(saved);
       setGenerationPrefixOptions(value);
       setGenerationPrefixSelection(nextSelection);
+      selectedGenerationPrefixRef.current = nextPrefix;
+      setPromptDocuments((current) => setPromptDocumentPrefix(current, previousPrefix, nextPrefix));
       setIsEditingGenerationPrefixes(false);
       recordStatus({ tone: "ready", message: "Generation prefix options saved locally." });
     } catch (error) {
@@ -595,6 +674,11 @@ export default function App() {
       recordStatus({ tone: "error", message: "Select one or more Media items before image generation." });
       return;
     }
+    const workflow = runningHubWorkflows.find((item) => item.id === runningHubWorkflowPresetId);
+    if (!workflow) {
+      recordStatus({ tone: "error", message: "Select an available RunningHub workflow before image generation." });
+      return;
+    }
 
     if (!tryBeginSessionMutation()) {
       return;
@@ -603,15 +687,15 @@ export default function App() {
     setIsGeneratingImages(true);
     const abortController = new AbortController();
     generationAbortControllerRef.current = abortController;
-    recordStatus({ tone: "running", message: "Sending the current edited prompts and source images to RunningHub." });
+    recordStatus({ tone: "running", message: "Sending the inputs configured for the selected RunningHub workflow." });
     try {
       const promptsByMediaId = new Map(promptDocuments.map((document) => [document.mediaId, getCurrentPrompt(document)]));
-      const promptImageJobs = selectedPromptMedia.flatMap((media) => {
-        const prompt = promptsByMediaId.get(media.id);
-        return prompt === undefined ? [] : [{ media, prompt }];
+      const workflowJobs = createRunningHubGenerationJobs({
+        bindings: workflow.bindings,
+        selectedMedia: selectedPromptMedia,
+        promptsByMediaId
       });
-      if (promptImageJobs.length !== selectedPromptMedia.length) throw new Error("Generate prompts with a text action before image generation.");
-      const imageJobs = repeatImageGenerationJobs(promptImageJobs, imageGenerationsPerMedia);
+      const imageJobs = repeatImageGenerationJobs(workflowJobs, imageGenerationsPerMedia);
       for (const [batchIndex, imageJob] of imageJobs.entries()) {
         const generated = await generateImagesWithOptions([imageJob], {
           runningHubWorkflowPresetId,
@@ -640,18 +724,14 @@ export default function App() {
   }
 
   async function handleGenerateVideos(runningHubWorkflowPresetId: string) {
-    const sourceVideos = sourceMaterials.filter((media) => selectedForGeneration.includes(media.id) && media.mediaType === "video");
-    const selectedGeneratedImages = generatedMaterials.filter((media) => selectedForGeneration.includes(media.id) && media.mediaType === "image");
-    if (sourceVideos.length !== 1 || selectedGeneratedImages.length !== 1) {
-      recordStatus({ tone: "error", message: "Select exactly one source video and one generated image before video generation." });
+    const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
+    if (selectedPromptMedia.length === 0) {
+      recordStatus({ tone: "error", message: "Select one or more Media items before video generation." });
       return;
     }
-
-    const sourceVideo = createPromptMediaInput(sourceVideos[0], currentSession);
-    const generatedImage = createPromptMediaInput(selectedGeneratedImages[0], currentSession);
-    const prompt = promptDocuments.find((document) => document.mediaId === sourceVideos[0].id);
-    if (!sourceVideo?.videoPath || !generatedImage?.generatedImagePath || !prompt) {
-      recordStatus({ tone: "error", message: "Generate and save a prompt for the selected source video before video generation." });
+    const workflow = runningHubWorkflows.find((item) => item.id === runningHubWorkflowPresetId);
+    if (!workflow) {
+      recordStatus({ tone: "error", message: "Select an available RunningHub workflow before video generation." });
       return;
     }
 
@@ -662,13 +742,15 @@ export default function App() {
     setIsGeneratingVideos(true);
     const abortController = new AbortController();
     generationAbortControllerRef.current = abortController;
-    recordStatus({ tone: "running", message: "Sending the selected source video, generated image, and video prompt to RunningHub." });
+    recordStatus({ tone: "running", message: "Sending the inputs configured for the selected RunningHub workflow." });
     try {
-      const generated = await generateVideosWithOptions({
-        sourceVideo,
-        generatedImage,
-        prompt: getCurrentPrompt(prompt)
-      }, {
+      const promptsByMediaId = new Map(promptDocuments.map((document) => [document.mediaId, getCurrentPrompt(document)]));
+      const jobs = createRunningHubGenerationJobs({
+        bindings: workflow.bindings,
+        selectedMedia: selectedPromptMedia,
+        promptsByMediaId
+      });
+      const generated = await generateVideosWithOptions(jobs, {
         runningHubWorkflowPresetId,
         signal: abortController.signal
       });
@@ -933,7 +1015,7 @@ export default function App() {
                 ollamaPresets={ollamaPresets}
                 runningHubWorkflows={runningHubWorkflows}
                 studioActionButtons={studioActionButtons}
-                onChangePrefix={setGenerationPrefixSelection}
+                onChangePrefix={handleChangeGenerationPrefix}
                 onChangeImageGenerationsPerMedia={setImageGenerationsPerMedia}
                 onEditPrefixes={() => setIsEditingGenerationPrefixes(true)}
                 isSessionMutationBusy={isSessionMutationBusy}
@@ -955,6 +1037,12 @@ export default function App() {
                 onSelectMaterial={(material) => {
                   setSelectedItemId(material.importItem.id);
                   setSelectedMediaId(material.id);
+                  setPromptDocuments((current) => ensurePromptDocument(current, {
+                    mediaId: material.id,
+                    label: material.label,
+                    prompt: selectedGenerationPrefix,
+                    managedPrefix: selectedGenerationPrefix
+                  }));
                 }}
                 onToggleMaterial={(materialId) => setSelectedForGeneration((current) => toggleMediaSelection(current, materialId))}
                 promptDocuments={promptDocuments}
@@ -1104,13 +1192,17 @@ function Preview({
   setPromptDocuments: React.Dispatch<React.SetStateAction<PromptDocument[]>>;
 }) {
   const imageSource = selected?.files.image ?? selected?.files.firstFrame ?? selected?.files.thumbnail;
+  const promptEditorMediaIds = new Set([
+    ...selectedForGeneration,
+    ...(selected?.id ? [selected.id] : [])
+  ]);
 
   return (
     <div className="preview-content">
       <div className="preview-main">
         <div className="preview-column"><div className="panel-label">Preview</div>
         <div className="media-stage">
-          {selected?.files.video ? (
+          {selected?.mediaType === "video" && selected.files.video ? (
             <video controls poster={selected.files.firstFrame ?? selected.files.thumbnail} ref={previewVideoRef} src={selected.files.video} />
           ) : imageSource && selected ? (
             <img alt={selected.importItem.title ?? "Imported Instagram media"} src={imageSource} />
@@ -1121,7 +1213,7 @@ function Preview({
         </div>
         <div className="media-column">
           <div className="panel-label">Media</div>
-          <MediaSelector canCaptureScreenshot={Boolean(selected?.files.video)} materials={sourceMaterials} onCaptureScreenshot={onCaptureScreenshot} onSelect={onSelectMaterial} onSelectAll={() => setSelectedForGeneration((current) => toggleAllMediaSelection(current, sourceMaterials.map((material) => material.id)))} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
+          <MediaSelector canCaptureScreenshot={selected?.mediaType === "video" && Boolean(selected.files.video)} materials={sourceMaterials} onCaptureScreenshot={onCaptureScreenshot} onSelect={onSelectMaterial} onSelectAll={() => setSelectedForGeneration((current) => toggleAllMediaSelection(current, sourceMaterials.map((material) => material.id)))} onToggle={onToggleMaterial} selected={selected} selectedForGeneration={selectedForGeneration} />
         </div>
         <div className="media-column generated-media-column">
           <div className="panel-label">Generated Media</div>
@@ -1154,12 +1246,12 @@ function Preview({
         />
       </div>
       <PromptEditors
-        documents={promptDocuments.filter((document) => selectedForGeneration.includes(document.mediaId))}
+        documents={promptDocuments.filter((document) => promptEditorMediaIds.has(document.mediaId))}
         isBusy={isSessionMutationBusy}
-        materials={materials.filter((material) => selectedForGeneration.includes(material.id))}
+        materials={materials.filter((material) => promptEditorMediaIds.has(material.id))}
         onEdit={(mediaId, value) => setPromptDocuments((current) => editPromptDocument(current, mediaId, value))}
         onRedo={(mediaId) => setPromptDocuments((current) => redoPromptDocument(current, mediaId))}
-        onReset={(mediaId) => setPromptDocuments((current) => resetPromptDocument(current, mediaId))}
+        onReset={(mediaId) => setPromptDocuments((current) => resetPromptDocument(current, mediaId, getGenerationPrefixText(generationPrefixOptions, generationPrefixSelection)))}
         onSave={onSavePrompt}
         onUndo={(mediaId) => setPromptDocuments((current) => undoPromptDocument(current, mediaId))}
       />
@@ -1173,6 +1265,10 @@ function parseGenerationPrefixes(value: string): Array<{ name: string; text: str
     if (separator < 1 || !line.slice(separator + 1).trim()) return [];
     return [{ name: line.slice(0, separator).trim(), text: line.slice(separator + 1).trim() }];
   });
+}
+
+function getGenerationPrefixText(options: string, selection: string): string {
+  return parseGenerationPrefixes(options).find((item) => item.name === selection)?.text ?? "";
 }
 
 function GenerationWorkspace({
@@ -1346,7 +1442,7 @@ function PromptEditors({
                <button disabled={isBusy} onClick={() => onSave(document.mediaId)} type="button">Сохранить</button>
             </div>
           </div>
-          <textarea disabled={isBusy} rows={8} value={getCurrentPrompt(document)} onChange={(event) => onEdit(document.mediaId, event.target.value)} />
+          <textarea rows={8} value={getCurrentPrompt(document)} onChange={(event) => onEdit(document.mediaId, event.target.value)} />
         </article>
       ))}
     </section>

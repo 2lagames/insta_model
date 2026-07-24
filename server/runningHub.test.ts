@@ -101,6 +101,32 @@ describe("cancelRunningHubTask", () => {
 describe("runRunningHubImageGeneration", () => {
   const sourceImagePath = fileURLToPath(import.meta.url);
 
+  it("rejects an empty prompt only when a prompt Studio ID is configured", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "runninghub-required-prompt-"));
+    let requestCount = 0;
+    const fetchImpl = (async () => {
+      requestCount += 1;
+      return new Response("unexpected");
+    }) as typeof fetch;
+
+    try {
+      await expect(runRunningHubImageGeneration({
+        outputDir: join(tempDir, "output"),
+        fetchImpl,
+        config: {
+          apiKey: "rh_api_key",
+          workflowId: "workflow",
+          bindings: [{ nodeId: "6", fieldName: "text", studioId: "2" }]
+        },
+        jobs: [{ mediaId: "photo", label: "Image", prompt: "" }]
+      })).rejects.toThrow("Studio ID 2 has no value");
+
+      expect(requestCount).toBe(0);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("saves a video workflow result returned by the v2 status query", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "runninghub-video-output-"));
     const videoPath = join(tempDir, "source.mp4");

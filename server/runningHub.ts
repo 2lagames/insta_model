@@ -28,7 +28,7 @@ export type RunningHubPromptJob = {
   mediaId: string;
   label: string;
   imagePath?: string;
-  prompt: string;
+  prompt?: string;
   videoPath?: string;
   generatedImagePath?: string;
 };
@@ -287,7 +287,7 @@ async function createTask(options: {
   fetchImpl: FetchLike;
   config: RunningHubConfig;
   bindings: RunningHubBinding[];
-  prompt: string;
+  prompt?: string;
   fieldValues: Map<string, string>;
   signal?: AbortSignal;
 }): Promise<string> {
@@ -351,10 +351,18 @@ async function resolveStudioFieldValues(options: {
     ["3", options.job.videoPath],
     ["4", options.job.generatedImagePath]
   ]);
-  const fieldValues = new Map<StudioId, string>([["2", options.job.prompt], ["5", options.job.prompt]]);
+  const fieldValues = new Map<StudioId, string>();
   const uploadedFiles = new Map<string, string>();
 
   for (const binding of options.bindings) {
+    if (binding.studioId === "2" || binding.studioId === "5") {
+      const prompt = options.job.prompt?.trim();
+      if (!prompt) {
+        throw new Error(`Studio ID ${binding.studioId} has no value for this media item.`);
+      }
+      fieldValues.set(binding.studioId, prompt);
+      continue;
+    }
     if (fieldValues.has(binding.studioId)) {
       continue;
     }

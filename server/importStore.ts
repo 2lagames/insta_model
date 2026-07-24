@@ -6,7 +6,8 @@ const emptyCurrentSession: CurrentMediaSession = {
   itemIds: [],
   sceneBibles: [],
   mediaSceneMap: {},
-  promptTexts: {}
+  promptTexts: {},
+  promptPrefixes: {}
 };
 
 export class ImportStore {
@@ -132,7 +133,8 @@ export class ImportStore {
       itemIds: [itemId],
       sceneBibles: sceneData?.sceneBibles ?? [],
       mediaSceneMap: sceneData?.mediaSceneMap ?? {},
-      promptTexts: {}
+      promptTexts: {},
+      promptPrefixes: {}
     };
     await this.writeIndex({
       ...index,
@@ -154,7 +156,8 @@ export class ImportStore {
         ...currentSession.mediaSceneMap,
         ...(sceneData?.mediaSceneMap ?? {})
       },
-      promptTexts: currentSession.promptTexts ?? {}
+      promptTexts: currentSession.promptTexts ?? {},
+      promptPrefixes: currentSession.promptPrefixes ?? {}
     };
     await this.writeIndex({
       ...index,
@@ -247,8 +250,9 @@ export function normalizeCurrentSession(index: ImportIndex): CurrentMediaSession
   return {
     itemIds: index.currentSession?.itemIds ?? index.currentSessionItemIds ?? [],
     sceneBibles: index.currentSession?.sceneBibles ?? [],
-    mediaSceneMap: index.currentSession?.mediaSceneMap ?? {}
-    ,promptTexts: index.currentSession?.promptTexts ?? {}
+    mediaSceneMap: index.currentSession?.mediaSceneMap ?? {},
+    promptTexts: index.currentSession?.promptTexts ?? {},
+    promptPrefixes: index.currentSession?.promptPrefixes ?? {}
   };
 }
 
@@ -325,6 +329,10 @@ function replaceSessionImportIds(
     .filter((itemId) => !deletedItemIds.has(itemId)))];
   const mediaSceneMap = Object.fromEntries(Object.entries(session.mediaSceneMap)
     .map(([mediaId, sceneId]) => [replaceMediaId(mediaId), sceneId]));
+  const promptTexts = Object.fromEntries(Object.entries(session.promptTexts ?? {})
+    .map(([mediaId, prompt]) => [replaceMediaId(mediaId), prompt]));
+  const promptPrefixes = Object.fromEntries(Object.entries(session.promptPrefixes ?? {})
+    .map(([mediaId, prefix]) => [replaceMediaId(mediaId), prefix]));
 
   return {
     itemIds,
@@ -332,6 +340,8 @@ function replaceSessionImportIds(
       ...sceneBible,
       sourceMediaIds: sceneBible.sourceMediaIds.map(replaceMediaId)
     })),
-    mediaSceneMap
+    mediaSceneMap,
+    promptTexts,
+    promptPrefixes
   };
 }

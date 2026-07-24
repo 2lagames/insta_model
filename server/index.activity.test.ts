@@ -148,29 +148,30 @@ describe("image prompt activity", () => {
     expect(source).toContain("if (!Array.isArray(value))");
   });
 
-  it("runs RunningHub only with submitted media and edited prompts", () => {
+  it("runs RunningHub only with the workflow-driven submitted inputs", () => {
     const source = readFileSync("server/index.ts", "utf8");
     const imageRouteStart = source.indexOf('app.post("/api/generation/images"');
     const imageRoute = source.slice(imageRouteStart, source.indexOf("const host", imageRouteStart));
 
-    expect(imageRoute).toContain("parseRunningHubPromptJobs(request.body?.jobs)");
+    expect(imageRoute).toContain("parseRunningHubGenerationJobs(request.body?.jobs)");
     expect(imageRoute).not.toContain("generateIdeogramPromptForMedia");
     expect(imageRoute).not.toContain("workflowJson");
-    expect(imageRoute).toContain("imagePath: job.media.generatedImagePath ? undefined : resolveStudioMediaPath(job.media.imagePath)");
+    expect(imageRoute).toContain("imagePath: resolveStudioMediaPath(job.media.imagePath)");
     expect(imageRoute).toContain("videoPath: job.media.videoPath ? resolveStudioMediaPath(job.media.videoPath) : undefined");
+    expect(imageRoute).toContain("generatedImagePath: resolveRunningHubGeneratedImagePath(job)");
     expect(imageRoute).toContain("onTaskCreated");
     expect(imageRoute).toContain("activeGeneration.registerRunningHubTask");
   });
 
-  it("runs a video workflow with the checked source video, generated image, and video prompt", () => {
+  it("runs a video workflow with only the inputs configured in its bindings", () => {
     const source = readFileSync("server/index.ts", "utf8");
     const videoRouteStart = source.indexOf('app.post("/api/generation/videos"');
     const videoRoute = source.slice(videoRouteStart, source.indexOf('app.post("/api/generation/cancel"', videoRouteStart));
 
-    expect(videoRoute).toContain("parseRunningHubVideoJob(request.body?.job)");
+    expect(videoRoute).toContain("parseRunningHubGenerationJobs(request.body?.jobs)");
     expect(videoRoute).toContain("runRunningHubVideoGeneration");
-    expect(videoRoute).toContain("videoPath: resolveStudioMediaPath(job.sourceVideo.videoPath)");
-    expect(videoRoute).toContain("generatedImagePath: resolveStudioMediaPath(job.generatedImage.generatedImagePath)");
+    expect(videoRoute).toContain("videoPath: job.media.videoPath ? resolveStudioMediaPath(job.media.videoPath) : undefined");
+    expect(videoRoute).toContain("generatedImagePath: resolveRunningHubGeneratedImagePath(job)");
     expect(videoRoute).toContain("prompt: job.prompt");
   });
 
@@ -202,5 +203,7 @@ describe("image prompt activity", () => {
     expect(source).toContain('app.put("/api/imports/session/prompts"');
     expect(source).toContain("parsePromptTexts(request.body?.prompts)");
     expect(source).toContain("promptTexts: { ...(currentSession.promptTexts ?? {}), ...prompts }");
+    expect(source).toContain("parsePromptTexts(request.body?.promptPrefixes)");
+    expect(source).toContain("promptPrefixes: { ...(currentSession.promptPrefixes ?? {}), ...promptPrefixes }");
   });
 });

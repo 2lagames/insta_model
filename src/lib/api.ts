@@ -1,5 +1,6 @@
 import type { CurrentMediaSession, ImportItem } from "./importTypes";
 import type { PromptMediaInput } from "./promptTypes";
+import type { RunningHubGenerationJobInput } from "./runningHubJobs";
 import type { RunningHubBinding } from "./studioBindings";
 import type { OllamaPreset, RunningHubWorkflowPreset, StudioActionButton } from "./generationPresets";
 
@@ -72,16 +73,8 @@ export type PromptGenerationResult = {
   session: CurrentMediaSession;
 };
 
-export type ImageGenerationJobInput = {
-  media: PromptMediaInput;
-  prompt: string;
-};
-
-export type VideoGenerationJobInput = {
-  sourceVideo: PromptMediaInput;
-  generatedImage: PromptMediaInput;
-  prompt: string;
-};
+export type ImageGenerationJobInput = RunningHubGenerationJobInput;
+export type VideoGenerationJobInput = RunningHubGenerationJobInput;
 
 export type ConnectionKeyName = "apifyApiToken" | "ollamaCloudApiKey" | "runningHubApiKey";
 
@@ -254,13 +247,16 @@ export async function resetMediaSession(): Promise<CurrentMediaSession> {
   return data.session ?? createEmptySession(data.sessionItemIds ?? []);
 }
 
-export async function saveSessionPrompts(prompts: Record<string, string>): Promise<CurrentMediaSession> {
+export async function saveSessionPrompts(
+  prompts: Record<string, string>,
+  promptPrefixes: Record<string, string> = {}
+): Promise<CurrentMediaSession> {
   const response = await apiFetch("/api/imports/session/prompts", {
     method: "PUT",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ prompts })
+    body: JSON.stringify({ prompts, promptPrefixes })
   });
   await assertOk(response);
   const data = await response.json() as { session?: CurrentMediaSession };
@@ -314,14 +310,14 @@ export async function generateImagesWithOptions(jobs: ImageGenerationJobInput[],
   };
 }
 
-export async function generateVideosWithOptions(job: VideoGenerationJobInput, options: { runningHubWorkflowPresetId?: string; signal?: AbortSignal } = {}): Promise<ImageGenerationResult> {
+export async function generateVideosWithOptions(jobs: VideoGenerationJobInput[], options: { runningHubWorkflowPresetId?: string; signal?: AbortSignal } = {}): Promise<ImageGenerationResult> {
   const response = await apiFetch("/api/generation/videos", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      job,
+      jobs,
       ...(options.runningHubWorkflowPresetId ? { runningHubWorkflowPresetId: options.runningHubWorkflowPresetId } : {})
     }),
     ...(options.signal ? { signal: options.signal } : {})
