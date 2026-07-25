@@ -362,7 +362,7 @@ app.post("/api/generation/images", async (request, response) => {
       jobs: jobs.map((job) => ({
         mediaId: job.media.id,
         label: job.media.label,
-        imagePath: resolveStudioMediaPath(job.media.imagePath),
+        imagePath: resolveStudioMediaPath(job.sourceImage?.imagePath ?? job.media.imagePath),
         videoPath: job.media.videoPath ? resolveStudioMediaPath(job.media.videoPath) : undefined,
         generatedImagePath: resolveRunningHubGeneratedImagePath(job),
         prompt: job.prompt
@@ -425,7 +425,7 @@ app.post("/api/generation/videos", async (request, response) => {
       jobs: jobs.map((job) => ({
         mediaId: job.media.id,
         label: job.media.label,
-        imagePath: resolveStudioMediaPath(job.media.imagePath),
+        imagePath: resolveStudioMediaPath(job.sourceImage?.imagePath ?? job.media.imagePath),
         videoPath: job.media.videoPath ? resolveStudioMediaPath(job.media.videoPath) : undefined,
         generatedImagePath: resolveRunningHubGeneratedImagePath(job),
         prompt: job.prompt
@@ -657,6 +657,7 @@ function parsePromptTexts(value: unknown): Record<string, string> {
 
 type ParsedRunningHubGenerationJob = {
   media: PromptMediaInput;
+  sourceImage?: PromptMediaInput;
   generatedImage?: PromptMediaInput;
   prompt?: string;
 };
@@ -678,8 +679,12 @@ function parseRunningHubGenerationJobs(value: unknown): ParsedRunningHubGenerati
     const [generatedImage] = record.generatedImage === undefined
       ? []
       : parsePromptMedia([record.generatedImage]);
+    const [sourceImage] = record.sourceImage === undefined
+      ? []
+      : parsePromptMedia([record.sourceImage]);
     return {
       media,
+      ...(sourceImage ? { sourceImage } : {}),
       ...(generatedImage ? { generatedImage } : {}),
       ...(prompt ? { prompt } : {})
     };

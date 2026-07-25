@@ -156,7 +156,7 @@ describe("image prompt activity", () => {
     expect(imageRoute).toContain("parseRunningHubGenerationJobs(request.body?.jobs)");
     expect(imageRoute).not.toContain("generateIdeogramPromptForMedia");
     expect(imageRoute).not.toContain("workflowJson");
-    expect(imageRoute).toContain("imagePath: resolveStudioMediaPath(job.media.imagePath)");
+    expect(imageRoute).toContain("imagePath: resolveStudioMediaPath(job.sourceImage?.imagePath ?? job.media.imagePath)");
     expect(imageRoute).toContain("videoPath: job.media.videoPath ? resolveStudioMediaPath(job.media.videoPath) : undefined");
     expect(imageRoute).toContain("generatedImagePath: resolveRunningHubGeneratedImagePath(job)");
     expect(imageRoute).toContain("onTaskCreated");
@@ -170,6 +170,7 @@ describe("image prompt activity", () => {
 
     expect(videoRoute).toContain("parseRunningHubGenerationJobs(request.body?.jobs)");
     expect(videoRoute).toContain("runRunningHubVideoGeneration");
+    expect(videoRoute).toContain("imagePath: resolveStudioMediaPath(job.sourceImage?.imagePath ?? job.media.imagePath)");
     expect(videoRoute).toContain("videoPath: job.media.videoPath ? resolveStudioMediaPath(job.media.videoPath) : undefined");
     expect(videoRoute).toContain("generatedImagePath: resolveRunningHubGeneratedImagePath(job)");
     expect(videoRoute).toContain("prompt: job.prompt");

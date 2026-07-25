@@ -87,4 +87,18 @@ describe("createRunningHubGenerationJobs", () => {
       generatedImage
     }]);
   });
+
+  it("uses the separately selected source image for an image-and-video workflow", () => {
+    expect(createRunningHubGenerationJobs({
+      bindings: [
+        { nodeId: "18", fieldName: "video", studioId: "3" },
+        { nodeId: "39", fieldName: "image", studioId: "1" }
+      ],
+      selectedMedia: [sourceImage, sourceVideo],
+      promptsByMediaId: new Map()
+    })).toEqual([{
+      media: sourceVideo,
+      sourceImage
+    }]);
+  });
 });

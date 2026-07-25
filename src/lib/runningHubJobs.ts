@@ -3,6 +3,7 @@ import type { RunningHubBinding, StudioId } from "./studioBindings";
 
 export type RunningHubGenerationJobInput = {
   media: PromptMediaInput;
+  sourceImage?: PromptMediaInput;
   generatedImage?: PromptMediaInput;
   prompt?: string;
 };
@@ -19,10 +20,19 @@ export function createRunningHubGenerationJobs(input: {
   const requiresGeneratedImage = requiredStudioIds.has("4");
   const requiresSourceMedia = requiresSourceImage || requiresSourceVideo;
   const sourceMedia = input.selectedMedia.filter((media) => !media.generatedImagePath);
+  const standaloneSourceImages = sourceMedia.filter((media) => Boolean(media.imagePath) && !media.videoPath);
   const generatedImages = input.selectedMedia.filter((media) => Boolean(media.generatedImagePath));
 
   let jobMedia: PromptMediaInput[];
-  if (requiresSourceMedia) {
+  if (requiresSourceImage && requiresSourceVideo) {
+    jobMedia = sourceMedia.filter((media) => Boolean(media.videoPath));
+    if (standaloneSourceImages.length !== 1) {
+      throw new Error("Select exactly one source image required by the selected workflow.");
+    }
+    if (jobMedia.length === 0) {
+      throw new Error(createMissingSourceMessage(requiresSourceImage, requiresSourceVideo));
+    }
+  } else if (requiresSourceMedia) {
     jobMedia = sourceMedia.filter((media) => (
       (!requiresSourceImage || Boolean(media.imagePath))
       && (!requiresSourceVideo || Boolean(media.videoPath))
@@ -55,6 +65,7 @@ export function createRunningHubGenerationJobs(input: {
 
     return {
       media,
+      ...(requiresSourceImage && requiresSourceVideo ? { sourceImage: standaloneSourceImages[0] } : {}),
       ...(requiresGeneratedImage
         ? { generatedImage: requiresSourceMedia ? generatedImages[0] : media }
         : {}),
