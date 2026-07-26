@@ -3,7 +3,7 @@ import type { PromptMediaInput } from "./promptTypes";
 import type { RunningHubGenerationJobInput } from "./runningHubJobs";
 import type { RunningHubBinding } from "./studioBindings";
 import type { OllamaPreset, RunningHubWorkflowPreset, StudioActionButton } from "./generationPresets";
-import type { GenerationJob } from "./generationJobs";
+import type { GenerationJob, GenerationJobMoveDirection } from "./generationJobs";
 
 type ImportsResponse = {
   items: ImportItem[];
@@ -371,6 +371,19 @@ export async function retryGenerationJob(jobId: string, confirmAmbiguous = false
   });
   await assertOk(response);
   return ((await response.json()) as { job: GenerationJob }).job;
+}
+
+export async function moveGenerationJob(
+  jobId: string,
+  direction: GenerationJobMoveDirection
+): Promise<GenerationJob[]> {
+  const response = await apiFetch(`/api/generation-jobs/${jobId}/move`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ direction })
+  });
+  await assertOk(response);
+  return ((await response.json()) as { jobs?: GenerationJob[] }).jobs ?? [];
 }
 
 async function enqueueGenerationJobs(

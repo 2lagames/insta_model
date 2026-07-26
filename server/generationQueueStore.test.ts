@@ -75,4 +75,21 @@ describe("GenerationQueueStore", () => {
     expect((await store.requestCancel(job.id)).status).toBe("canceled");
     expect(await store.claimNext()).toBeUndefined();
   });
+
+  it("moves only queued jobs and preserves their order after reopening the store", async () => {
+    const root = await mkdtemp(join(tmpdir(), "generation-queue-order-"));
+    tempDirs.push(root);
+    const store = new GenerationQueueStore(root);
+    const [active, firstQueued, secondQueued] = await store.createJobs("image", [input, input, input]);
+    await store.transition(active.id, "preparing");
+
+    await store.moveQueued(secondQueued.id, "up");
+
+    expect((await new GenerationQueueStore(root).list()).map((job) => job.id)).toEqual([
+      active.id,
+      secondQueued.id,
+      firstQueued.id
+    ]);
+    await expect(store.moveQueued(active.id, "down")).rejects.toThrow(/only queued/i);
+  });
 });

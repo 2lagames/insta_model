@@ -368,7 +368,8 @@ input {
   grid-template-columns: repeat(4, 116px);
   grid-auto-rows: 116px;
   align-content: start;
-  justify-content: space-between;
+  justify-content: start;
+  column-gap: 8px;
   row-gap: 20px;
 }
 
@@ -550,7 +551,7 @@ input {
 
 .queue-page {
   width: min(100%, 1240px);
-  justify-self: center;
+  justify-self: start;
   align-self: start;
   border: 1px solid #d6d0c4;
   border-radius: 12px;
@@ -783,6 +784,11 @@ input {
   justify-content: flex-end;
 }
 
+.queue-order-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+
 .queue-actions button,
 .queue-actions a {
   min-height: 36px;
@@ -796,6 +802,19 @@ input {
   font-size: 13px;
   text-decoration: none;
   cursor: pointer;
+}
+
+.queue-actions .queue-order-button {
+  width: 36px;
+  padding: 0;
+  background: #fffdf8;
+  color: #514a42;
+  font-size: 17px;
+}
+
+.queue-actions .queue-order-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .queue-action-secondary {

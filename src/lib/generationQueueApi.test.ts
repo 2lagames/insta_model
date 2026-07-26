@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cancelGenerationJob, enqueueImageJobs, listGenerationJobs, retryGenerationJob } from "./api";
+import { cancelGenerationJob, enqueueImageJobs, listGenerationJobs, moveGenerationJob, retryGenerationJob } from "./api";
 
 const queuedJob = {
   id: "job-1",
@@ -44,5 +44,19 @@ describe("generation queue API", () => {
       method: "POST",
       body: JSON.stringify({ confirmAmbiguous: true })
     }));
+  });
+
+  it("moves a queued job in the persistent queue", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
+      JSON.stringify({ jobs: [queuedJob] })
+    ));
+
+    await expect(moveGenerationJob("job-1", "up")).resolves.toHaveLength(1);
+
+    expect(fetchSpy).toHaveBeenCalledWith("/api/generation-jobs/job-1/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ direction: "up" })
+    });
   });
 });

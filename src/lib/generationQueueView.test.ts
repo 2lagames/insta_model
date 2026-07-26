@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { GenerationJob, GenerationJobStatus } from "./generationJobs";
 import {
   filterGenerationJobs,
+  getGenerationJobMoveAvailability,
   getGenerationStatusPresentation,
   getNewGenerationOutputIds,
   summarizeGenerationJobs
@@ -74,5 +75,27 @@ describe("generation queue presentation", () => {
       job("succeeded", "output-2"),
       job("running")
     ], observed)).toEqual(["output-2"]);
+  });
+
+  it("allows queued jobs to move only within the queued portion of the list", () => {
+    const running = job("running");
+    const firstQueued = job("queued");
+    firstQueued.id = "queued-1";
+    const secondQueued = job("queued");
+    secondQueued.id = "queued-2";
+    const jobs = [running, firstQueued, job("succeeded"), secondQueued];
+
+    expect(getGenerationJobMoveAvailability(jobs, running.id)).toEqual({
+      canMoveUp: false,
+      canMoveDown: false
+    });
+    expect(getGenerationJobMoveAvailability(jobs, firstQueued.id)).toEqual({
+      canMoveUp: false,
+      canMoveDown: true
+    });
+    expect(getGenerationJobMoveAvailability(jobs, secondQueued.id)).toEqual({
+      canMoveUp: true,
+      canMoveDown: false
+    });
   });
 });

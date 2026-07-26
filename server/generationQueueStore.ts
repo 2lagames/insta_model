@@ -8,6 +8,7 @@ import {
   type GenerationJobError,
   type GenerationJobInput,
   type GenerationJobKind,
+  type GenerationJobMoveDirection,
   type GenerationJobSnapshot,
   type GenerationJobStatus
 } from "../src/lib/generationJobs";
@@ -106,6 +107,34 @@ export class GenerationQueueStore {
       return await this.transition(id, "canceling", { cancelRequestedAt: new Date().toISOString() });
     }
     return job;
+  }
+
+  async moveQueued(id: string, direction: GenerationJobMoveDirection): Promise<GenerationJob[]> {
+    let result: GenerationJob[] = [];
+    await this.state.mutate((snapshot) => {
+      const index = snapshot.jobs.findIndex((job) => job.id === id);
+      if (index < 0) throw new Error(`Generation job ${id} was not found.`);
+      if (snapshot.jobs[index].status !== "queued") {
+        throw new Error("Only queued generation jobs can be moved.");
+      }
+
+      const queuedIndexes = snapshot.jobs.flatMap((job, jobIndex) => (
+        job.status === "queued" ? [jobIndex] : []
+      ));
+      const queuedIndex = queuedIndexes.indexOf(index);
+      const targetQueuedIndex = direction === "up" ? queuedIndex - 1 : queuedIndex + 1;
+      if (targetQueuedIndex < 0 || targetQueuedIndex >= queuedIndexes.length) {
+        result = snapshot.jobs;
+        return snapshot;
+      }
+
+      const targetIndex = queuedIndexes[targetQueuedIndex];
+      const jobs = [...snapshot.jobs];
+      [jobs[index], jobs[targetIndex]] = [jobs[targetIndex], jobs[index]];
+      result = jobs;
+      return { ...snapshot, jobs };
+    });
+    return result;
   }
 
   async retry(id: string, options: { confirmAmbiguous?: boolean } = {}): Promise<GenerationJob> {

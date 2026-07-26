@@ -49,3 +49,15 @@ export function getNewGenerationOutputIds(jobs: GenerationJob[], observedIds: Re
       : []
   ));
 }
+
+export function getGenerationJobMoveAvailability(
+  jobs: GenerationJob[],
+  jobId: string
+): { canMoveUp: boolean; canMoveDown: boolean } {
+  const queuedJobs = jobs.filter((job) => job.status === "queued");
+  const queuedIndex = queuedJobs.findIndex((job) => job.id === jobId);
+  return {
+    canMoveUp: queuedIndex > 0,
+    canMoveDown: queuedIndex >= 0 && queuedIndex < queuedJobs.length - 1
+  };
+}

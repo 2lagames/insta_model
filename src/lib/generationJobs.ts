@@ -3,6 +3,7 @@ import type { RunningHubWorkflowPreset } from "./generationPresets";
 import type { RunningHubGenerationJobInput } from "./runningHubJobs";
 
 export type GenerationJobKind = "image" | "video";
+export type GenerationJobMoveDirection = "up" | "down";
 export type GenerationJobStatus =
   | "queued"
   | "preparing"

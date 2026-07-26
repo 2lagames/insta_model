@@ -12,6 +12,7 @@ import {
   listImports,
   listGenerationJobs,
   listOllamaModels,
+  moveGenerationJob,
   openImportsFolder,
   resetMediaSession,
   retryGenerationJob,
@@ -22,9 +23,10 @@ import {
   type ConnectionKeyName,
   type PublicConnections
 } from "./lib/api";
-import type { GenerationJob } from "./lib/generationJobs";
+import type { GenerationJob, GenerationJobMoveDirection } from "./lib/generationJobs";
 import {
   filterGenerationJobs,
+  getGenerationJobMoveAvailability,
   getGenerationStatusPresentation,
   getNewGenerationOutputIds,
   summarizeGenerationJobs,
@@ -1169,6 +1171,7 @@ export default function App() {
         <GenerationQueuePage
           jobs={generationJobs}
           onCancel={(jobId) => void cancelGenerationJob(jobId).catch((error: unknown) => recordStatus({ tone: "error", message: toErrorMessage(error) }))}
+          onMove={(jobId, direction) => void moveGenerationJob(jobId, direction).then(setGenerationJobs).catch((error: unknown) => recordStatus({ tone: "error", message: toErrorMessage(error) }))}
           onRetry={(jobId, ambiguous) => void retryGenerationJob(jobId, ambiguous).then(() => listGenerationJobs()).then(setGenerationJobs).catch((error: unknown) => recordStatus({ tone: "error", message: toErrorMessage(error) }))}
         />
       ) : (
@@ -1223,10 +1226,12 @@ export default function App() {
 function GenerationQueuePage({
   jobs,
   onCancel,
+  onMove,
   onRetry
 }: {
   jobs: GenerationJob[];
   onCancel: (jobId: string) => void;
+  onMove: (jobId: string, direction: GenerationJobMoveDirection) => void;
   onRetry: (jobId: string, ambiguous: boolean) => void;
 }) {
   const [filter, setFilter] = useState<GenerationQueueFilter>("active");
@@ -1244,7 +1249,7 @@ function GenerationQueuePage({
       <div>
         <div className="panel-label">Queue</div>
         <h1>Очередь генерации</h1>
-        <p>Изображения и видео выполняются последовательно. Готовые результаты сразу появляются в Generated Media.</p>
+        <p>Изображения и видео выполняются последовательно. Ожидающие задания можно менять местами, а готовые результаты сразу появляются в Generated Media.</p>
       </div>
       <div aria-label="Фильтр очереди" className="queue-filters">
         {filterOptions.map((option) => (
@@ -1260,6 +1265,7 @@ function GenerationQueuePage({
         const previewPath = job.input.job.media.imagePath ?? job.input.job.sourceImage?.imagePath ?? job.input.job.generatedImage?.imagePath;
         const canCancel = ["queued", "preparing", "uploading", "submitting", "running", "downloading"].includes(job.status);
         const canRetry = job.status === "failed" || job.status === "recovery_required";
+        const moveAvailability = getGenerationJobMoveAvailability(jobs, job.id);
         const status = getGenerationStatusPresentation(job.status);
         return <article className={`queue-row queue-${job.status}`} key={job.id}>
           <div className="queue-preview">
@@ -1277,6 +1283,10 @@ function GenerationQueuePage({
           </div>
           <div className="queue-error">{job.error?.message ?? ""}</div>
           <div className="queue-actions">
+            {job.status === "queued" ? <div className="queue-order-actions">
+              <button aria-label={`Переместить ${job.input.job.media.label} вверх`} className="queue-order-button" disabled={!moveAvailability.canMoveUp} onClick={() => onMove(job.id, "up")} title="Переместить вверх" type="button">↑</button>
+              <button aria-label={`Переместить ${job.input.job.media.label} вниз`} className="queue-order-button" disabled={!moveAvailability.canMoveDown} onClick={() => onMove(job.id, "down")} title="Переместить вниз" type="button">↓</button>
+            </div> : null}
             {canCancel ? <button className="queue-action-secondary" onClick={() => onCancel(job.id)} type="button">Отменить</button> : null}
             {canRetry ? <button className="queue-action-primary" onClick={() => onRetry(job.id, job.status === "recovery_required")} type="button">Повторить</button> : null}
             {outputPath ? <a className="queue-action-primary" href={outputPath} rel="noreferrer" target="_blank">Открыть</a> : null}

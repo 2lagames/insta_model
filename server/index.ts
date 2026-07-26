@@ -381,6 +381,20 @@ app.post("/api/generation-jobs/:jobId/retry", async (request, response) => {
   }
 });
 
+app.post("/api/generation-jobs/:jobId/move", async (request, response) => {
+  try {
+    const direction = request.body?.direction;
+    if (direction !== "up" && direction !== "down") {
+      throw new Error("Generation job move direction must be up or down.");
+    }
+    const jobs = await generationQueue.moveQueued(request.params.jobId, direction);
+    generationEvents.publish(jobs);
+    response.json({ jobs });
+  } catch (error) {
+    response.status(400).json({ error: toErrorMessage(error) });
+  }
+});
+
 app.post("/api/generation/images", async (request, response) => {
   let generation: GenerationOperation | undefined;
   try {
