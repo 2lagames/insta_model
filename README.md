@@ -1,6 +1,6 @@
 # Instagram Import Studio
 
-Local web studio for turning Instagram photo posts, carousels, Reels, and local image files into reusable source material for a content-production workflow. It downloads photos and Reel videos through Apify's official Instagram Scraper actor; generates editable image prompts with Ollama Cloud or a local Ollama instance; and sends the selected source image and final prompt to a RunningHub ComfyUI workflow running Krea 2.
+Local web studio for turning Instagram photo posts, carousels, Reels, and local photo/video files into reusable source material for image and video generation. It imports Instagram media through Apify, creates editable prompts with Ollama Cloud or a local Ollama instance, and executes configurable RunningHub ComfyUI workflows through a persistent local queue.
 
 It is designed for creators who need to revisit the same reference post without repeatedly downloading the same assets. Normal imports reuse healthy local media; use **Обновить заново** only when a fresh download is needed.
 
@@ -55,17 +55,30 @@ You can also update from a terminal:
 ./update.sh
 ```
 
-## Connections
+## Settings
 
-Open the `Подключения` tab and save API settings there:
+Open the `Настройки` tab and save API settings there:
 
 - Apify API token for Instagram photo and Reel imports.
-- Ollama Cloud API key, Cloud/Local mode, model selection, and shared instruction for prompt generation.
-- RunningHub API key and workflow ID for Krea 2 generation.
-- Prompt node ID and prompt field name for replacing the workflow prompt.
-- Image node ID and image field name for the workflow `LoadImage` node.
+- Ollama Cloud API key and reusable Cloud/Local prompt presets.
+- RunningHub API key and reusable workflow presets.
+- RunningHub execution mode (`Standard` or `Plus`) for each workflow.
+- Node ID, field name, and Studio ID bindings that define every workflow input.
+- Ordered Studio actions for text, image, and video generation.
 
 API keys are shown in the UI only as a masked preview. Use **Вставить ключ** to replace a key and **Очистить** to remove it. The replacement field is always empty: the saved raw key is never loaded into the browser. The workflow JSON is managed in RunningHub and is not uploaded to this application.
+
+RunningHub bindings are the source of truth for generation inputs:
+
+| Studio ID | Input |
+| --- | --- |
+| `1` | Source image |
+| `2` | Prompt belonging to the selected image |
+| `3` | Source video |
+| `4` | Generated image |
+| `5` | Prompt belonging to the selected video |
+
+Image and video prompts are stored separately in each queue job. A workflow using both IDs `2` and `5` therefore receives two independent prompt values.
 
 The key is stored locally in:
 
@@ -79,40 +92,52 @@ Local persistence does not prevent the configured integrations from receiving da
 
 ## Import Flow
 
-1. Paste an Instagram photo post, carousel, or Reel URL in `Студия` and press `Import`, or use **Загрузить изображение** to select a local image.
+1. Paste an Instagram photo post, carousel, or Reel URL in `Студия` and press `Import`, or use **Загрузить медиа** to select one or more local photo/video files.
 2. The local API runs `apify/instagram-scraper` through Apify with the URL as the only input and a result limit of `1`; it uses the actor's Reel mode for Reel URLs.
 3. The application saves photos, carousel items, and Reel MP4 files. For a Reel it also generates a local first-frame preview. Captions, comments, profile data, and other raw Apify response fields are discarded.
 4. Downloaded or uploaded source media is stored under `input/`.
 
 **Сброс** clears the current media session, preview, metadata, and prompt text, but keeps the Studio layout and persistent Generation workspace options. It does not delete files from `input/` or `output/`.
 
-## Image Prompt Flow
+## Studio Flow
 
-The `Media` panel supports selecting one or more materials for later generation. The active preview and the selected generation queue are separate: click a card to preview it, use `Use` to include it in prompt generation.
+The `Media` panel supports selecting one or more materials for later generation. The active preview and selected generation inputs are separate: click a card to preview it, and use `Use` to include it in generation.
 
-Press `Generate prompt` to send the selected source image to the model currently selected in **Ollama Cloud** or **Локальная Ollama**. The shared instruction is edited on the `Подключения` page.
+Reel videos and their first frames remain separate reusable materials. Images are labeled `IMAGE 1`, `IMAGE 2`, and so on; videos use an independent `REEL 1`, `REEL 2` sequence.
+
+Press `Generate prompt` to send the selected source image to the model configured by the selected Ollama text action. Ollama Cloud and local Ollama presets are edited on the `Настройки` page.
 
 Each generated prompt is displayed in a large editable field. Typing, undo, redo, reset, and an applied Generation workspace prefix are saved to the local current session after a short pause. You can also press **Сохранить** explicitly. Saved prompt text persists when the page is reloaded within the current media session, and image generation saves the exact latest text before sending it to RunningHub.
 
 The **Generation workspace** selector stores reusable prefix variants in the format `Название;Текст`, one variant per line. When a variant is selected, the final prompt is `Текст, Image`, where `Image` is the generated or edited Ollama prompt. With **Не выбрано**, the Ollama prompt is used unchanged. These variants are saved in application settings and are not changed by **Сброс**.
 
-Press `Image generation` to upload each selected source image to RunningHub and create a task through `POST /task/openapi/create`. The app uses `nodeInfoList` to replace both the configured prompt node field and the configured `LoadImage` field. The configured workflow generates images with **Krea 2**. The task payload requests RunningHub Plus with `instanceType: "plus"`.
+Press `Image generation` or `Video generation` to create one independent queue job for every requested result. The selected RunningHub workflow determines which source image, source video, generated image, image prompt, and video prompt are sent through `nodeInfoList`.
 
-The uploaded ComfyUI workflow must include a `SaveImage` node connected to the final image. `PreviewImage` is useful inside ComfyUI, but it does not expose files through RunningHub `/task/openapi/outputs`, so the app cannot download generated images from preview-only workflows. Do not connect `SaveImage.images` to `PreviewImage`; connect it to the same final image source that feeds preview, for example `VAEDecode` or the final image pass-through node.
+The uploaded ComfyUI workflow must include an output-saving node connected to the final result. Preview-only nodes do not expose files through the RunningHub output API, so the app cannot download their results.
 
-After a RunningHub task reaches `SUCCESS`, the app polls outputs up to 12 times by default. Override this with `RUNNINGHUB_OUTPUT_MAX_POLLS` if RunningHub needs more time to expose saved files.
+## Generation Queue
 
-Prompt generation returns ordinary editable text. The exact wording and detail level are controlled by the shared Ollama instruction, so the same application can work with different Ollama vision models.
+The `Queue` tab is the persistent source of truth for generation:
 
-The app saves every image returned by RunningHub for each selected Media item. If your workflow returns 1 image, the app saves 1; if it returns 4 images, the app saves all 4. The only invalid result is an empty output list.
+- jobs execute sequentially in a server worker;
+- waiting jobs can be moved up or down;
+- each card shows the frozen media and prompt recipe used by that job;
+- each result is saved independently, so one failed job does not remove successful outputs;
+- active RunningHub task IDs and queue states survive a page reload or server restart;
+- cancellation remains in `canceling` until the provider confirms the terminal result;
+- provider polling is shown as `Генерация`, and `Скачивание` starts only when output URLs are ready.
 
-Generated images are saved under:
+Completed images and videos are registered immediately and appear in `Generated Media` without waiting for the rest of the queue. Generated video thumbnails are created locally so results can be selected again as inputs.
+
+Queue state is stored in a versioned local JSON file under `data/`. Writes use validation, serialized mutations, atomic replacement, and a backup. Only one server process should write these files.
+
+Generated output files are saved under:
 
 ```text
 output/YYYYMMDD/
 ```
 
-They also appear as a new `Media` item in the current UI session.
+Runtime data, generated media, queue state, and connection settings remain local and are ignored by git.
 
 ## Development
 
