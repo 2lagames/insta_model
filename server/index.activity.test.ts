@@ -2,6 +2,16 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("image prompt activity", () => {
+  it("reports the package version from one release source of truth", () => {
+    const source = readFileSync("server/index.ts", "utf8");
+    const healthRouteStart = source.indexOf('app.get("/api/health"');
+    const healthRoute = source.slice(healthRouteStart, source.indexOf('app.get("/api/events"', healthRouteStart));
+
+    expect(source).toContain('readFileSync(new URL("../package.json", import.meta.url), "utf8")');
+    expect(healthRoute).toContain("version: packageMetadata.version");
+    expect(healthRoute).not.toContain('version: "');
+  });
+
   it("appends later local uploads to the current media session", () => {
     const source = readFileSync("server/index.ts", "utf8");
     const uploadRouteStart = source.indexOf('app.post("/api/imports/upload-image"');

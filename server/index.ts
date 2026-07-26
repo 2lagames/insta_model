@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, extname, join, relative, resolve } from "node:path";
 import express from "express";
@@ -20,6 +21,7 @@ import { GenerationQueueStore } from "./generationQueueStore";
 import { GenerationWorker } from "./generationWorker";
 import { cancelRunningHubTask, runRunningHubImageGeneration, runRunningHubVideoGeneration } from "./runningHub";
 
+const packageMetadata = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
 const port = Number(process.env.API_PORT ?? 4317);
 const projectRoot = process.cwd();
 const dataDir = join(projectRoot, "data");
@@ -63,7 +65,7 @@ app.get("/api/health", (_request, response) => {
   response.json({
     ok: true,
     importProvider: "apify",
-    version: "0.11.2"
+    version: packageMetadata.version
   });
 });
 
