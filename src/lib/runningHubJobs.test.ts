@@ -59,18 +59,28 @@ describe("createRunningHubGenerationJobs", () => {
 
   it("requires prompt text only when Studio ID 2 or 5 is configured", () => {
     expect(() => createRunningHubGenerationJobs({
-      bindings: [{ nodeId: "6", fieldName: "text", studioId: "5" }],
+      bindings: [
+        { nodeId: "18", fieldName: "video", studioId: "3" },
+        { nodeId: "6", fieldName: "text", studioId: "5" }
+      ],
       selectedMedia: [sourceVideo],
       promptsByMediaId: new Map()
     })).toThrow("prompt");
 
     expect(createRunningHubGenerationJobs({
-      bindings: [{ nodeId: "6", fieldName: "text", studioId: "5" }],
+      bindings: [
+        { nodeId: "18", fieldName: "video", studioId: "3" },
+        { nodeId: "6", fieldName: "text", studioId: "5" }
+      ],
       selectedMedia: [sourceVideo],
       promptsByMediaId: new Map([["source-video", "Animate this"]])
     })).toEqual([{
       media: sourceVideo,
-      prompt: "Animate this"
+      videoPrompt: {
+        mediaId: sourceVideo.id,
+        mediaLabel: sourceVideo.label,
+        text: "Animate this"
+      }
     }]);
   });
 
@@ -86,6 +96,52 @@ describe("createRunningHubGenerationJobs", () => {
       media: sourceVideo,
       generatedImage
     }]);
+  });
+
+  it("stores independent image and video prompts from the media types configured by the workflow", () => {
+    const reel = { ...sourceVideo, label: "REEL 1" };
+    const image = { ...generatedImage, label: "IMAGE 2" };
+
+    expect(createRunningHubGenerationJobs({
+      bindings: [
+        { nodeId: "18", fieldName: "video", studioId: "3" },
+        { nodeId: "44", fieldName: "image", studioId: "4" },
+        { nodeId: "6", fieldName: "image_prompt", studioId: "2" },
+        { nodeId: "7", fieldName: "video_prompt", studioId: "5" }
+      ],
+      selectedMedia: [reel, image],
+      promptsByMediaId: new Map([
+        [reel.id, "Video movement"],
+        [image.id, "Image appearance"]
+      ])
+    })).toEqual([{
+      media: reel,
+      generatedImage: image,
+      imagePrompt: {
+        mediaId: image.id,
+        mediaLabel: "IMAGE 2",
+        text: "Image appearance"
+      },
+      videoPrompt: {
+        mediaId: reel.id,
+        mediaLabel: "REEL 1",
+        text: "Video movement"
+      }
+    }]);
+  });
+
+  it("rejects prompt bindings that do not configure their matching media type", () => {
+    expect(() => createRunningHubGenerationJobs({
+      bindings: [{ nodeId: "6", fieldName: "text", studioId: "2" }],
+      selectedMedia: [sourceImage],
+      promptsByMediaId: new Map([[sourceImage.id, "Image prompt"]])
+    })).toThrow(/Studio ID 2.*Studio ID 1 or 4/i);
+
+    expect(() => createRunningHubGenerationJobs({
+      bindings: [{ nodeId: "7", fieldName: "text", studioId: "5" }],
+      selectedMedia: [sourceVideo],
+      promptsByMediaId: new Map([[sourceVideo.id, "Video prompt"]])
+    })).toThrow(/Studio ID 5.*Studio ID 3/i);
   });
 
   it("uses the separately selected source image for an image-and-video workflow", () => {
@@ -135,7 +191,11 @@ describe("createRunningHubGenerationJobs", () => {
     expect(editorPrompts.get("source-image")?.value).toBe("Portrait lighting\nGenerated description");
     expect(jobs).toEqual([{
       media: sourceImage,
-      prompt: "Portrait lighting\nGenerated description",
+      imagePrompt: {
+        mediaId: sourceImage.id,
+        mediaLabel: sourceImage.label,
+        text: "Portrait lighting\nGenerated description"
+      }
     }]);
   });
 
@@ -163,11 +223,15 @@ describe("createRunningHubGenerationJobs", () => {
 
     expect(jobs).toEqual([{
       media: sourceImage,
-      prompt: "My edited prompt",
+      imagePrompt: {
+        mediaId: sourceImage.id,
+        mediaLabel: sourceImage.label,
+        text: "My edited prompt"
+      }
     }]);
   });
 
-  it("generates prompts only for job media and not for auxiliary workflow inputs", async () => {
+  it("generates the image prompt for the generated image selected by Studio ID 4", async () => {
     const generatedFor: string[] = [];
 
     const jobs = await prepareRunningHubGenerationJobs({
@@ -191,11 +255,15 @@ describe("createRunningHubGenerationJobs", () => {
       },
     });
 
-    expect(generatedFor).toEqual(["source-image"]);
+    expect(generatedFor).toEqual(["generated-image"]);
     expect(jobs).toEqual([{
       media: sourceImage,
       generatedImage,
-      prompt: "Prompt for source-image",
+      imagePrompt: {
+        mediaId: generatedImage.id,
+        mediaLabel: generatedImage.label,
+        text: "Prompt for generated-image"
+      }
     }]);
   });
 

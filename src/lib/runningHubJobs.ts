@@ -2,10 +2,19 @@ import type { PromptMediaInput } from "./promptTypes";
 import type { OllamaPreset, StudioActionButton } from "./generationPresets";
 import type { RunningHubBinding, StudioId } from "./studioBindings";
 
+export type RunningHubTextPromptInput = {
+  mediaId: string;
+  mediaLabel: string;
+  text: string;
+};
+
 export type RunningHubGenerationJobInput = {
   media: PromptMediaInput;
   sourceImage?: PromptMediaInput;
   generatedImage?: PromptMediaInput;
+  imagePrompt?: RunningHubTextPromptInput;
+  videoPrompt?: RunningHubTextPromptInput;
+  /** Legacy persisted queue jobs only. */
   prompt?: string;
 };
 
@@ -26,9 +35,7 @@ export async function prepareRunningHubGenerationJobs(input: {
   const promptsByMediaId = new Map(
     Array.from(input.promptEntriesByMediaId, ([mediaId, entry]) => [mediaId, entry.value]),
   );
-  const requiresPrompt = input.bindings.some((binding) => (
-    binding.studioId === "2" || binding.studioId === "5"
-  ));
+  const requiresPrompt = input.bindings.some((binding) => binding.studioId === "2" || binding.studioId === "5");
   let missingPromptMedia: PromptMediaInput[] = [];
   if (requiresPrompt) {
     const validationPromptsByMediaId = new Map(promptsByMediaId);
@@ -42,9 +49,13 @@ export async function prepareRunningHubGenerationJobs(input: {
       selectedMedia: input.selectedMedia,
       promptsByMediaId: validationPromptsByMediaId,
     });
-    missingPromptMedia = pendingJobs
-      .map((job) => job.media)
-      .filter((media) => !hasPromptBody(input.promptEntriesByMediaId.get(media.id)));
+    const promptSourceIds = new Set(pendingJobs.flatMap((job) => [
+      ...(job.imagePrompt ? [job.imagePrompt.mediaId] : []),
+      ...(job.videoPrompt ? [job.videoPrompt.mediaId] : [])
+    ]));
+    missingPromptMedia = input.selectedMedia.filter((media) => (
+      promptSourceIds.has(media.id) && !hasPromptBody(input.promptEntriesByMediaId.get(media.id))
+    ));
   }
 
   if (missingPromptMedia.length > 0) {
@@ -89,10 +100,17 @@ export function createRunningHubGenerationJobs(input: {
 }): RunningHubGenerationJobInput[] {
   const requiredStudioIds = new Set<StudioId>(input.bindings.map((binding) => binding.studioId));
   const requiresSourceImage = requiredStudioIds.has("1");
-  const requiresPrompt = requiredStudioIds.has("2") || requiredStudioIds.has("5");
+  const requiresImagePrompt = requiredStudioIds.has("2");
   const requiresSourceVideo = requiredStudioIds.has("3");
   const requiresGeneratedImage = requiredStudioIds.has("4");
+  const requiresVideoPrompt = requiredStudioIds.has("5");
   const requiresSourceMedia = requiresSourceImage || requiresSourceVideo;
+  if (requiresImagePrompt && !requiresSourceImage && !requiresGeneratedImage) {
+    throw new Error("Studio ID 2 requires Studio ID 1 or 4 in the same workflow.");
+  }
+  if (requiresVideoPrompt && !requiresSourceVideo) {
+    throw new Error("Studio ID 5 requires Studio ID 3 in the same workflow.");
+  }
   const sourceMedia = input.selectedMedia.filter((media) => !media.generatedImagePath);
   const standaloneSourceImages = sourceMedia.filter((media) => Boolean(media.imagePath) && !media.videoPath);
   const generatedImages = input.selectedMedia.filter((media) => Boolean(media.generatedImagePath));
@@ -132,20 +150,42 @@ export function createRunningHubGenerationJobs(input: {
   }
 
   return jobMedia.map((media) => {
-    const prompt = input.promptsByMediaId.get(media.id);
-    if (requiresPrompt && !prompt?.trim()) {
-      throw new Error(`Write or generate a prompt for ${media.label}; the selected workflow requires a prompt.`);
-    }
+    const sourceImage = requiresSourceImage && requiresSourceVideo ? standaloneSourceImages[0] : undefined;
+    const generatedImage = requiresGeneratedImage
+      ? (requiresSourceMedia ? generatedImages[0] : media)
+      : undefined;
+    const imagePromptSource = requiresImagePrompt
+      ? generatedImage ?? sourceImage ?? (!media.videoPath ? media : undefined)
+      : undefined;
+    const videoPromptSource = requiresVideoPrompt && media.videoPath ? media : undefined;
 
     return {
       media,
-      ...(requiresSourceImage && requiresSourceVideo ? { sourceImage: standaloneSourceImages[0] } : {}),
-      ...(requiresGeneratedImage
-        ? { generatedImage: requiresSourceMedia ? generatedImages[0] : media }
-        : {}),
-      ...(requiresPrompt ? { prompt: prompt!.trim() } : {})
+      ...(sourceImage ? { sourceImage } : {}),
+      ...(generatedImage ? { generatedImage } : {}),
+      ...(imagePromptSource ? {
+        imagePrompt: createTextPromptInput(imagePromptSource, input.promptsByMediaId)
+      } : {}),
+      ...(videoPromptSource ? {
+        videoPrompt: createTextPromptInput(videoPromptSource, input.promptsByMediaId)
+      } : {})
     };
   });
+}
+
+function createTextPromptInput(
+  media: PromptMediaInput,
+  promptsByMediaId: Map<string, string>
+): RunningHubTextPromptInput {
+  const text = promptsByMediaId.get(media.id)?.trim();
+  if (!text) {
+    throw new Error(`Write or generate a prompt for ${media.label}; the selected workflow requires a prompt.`);
+  }
+  return {
+    mediaId: media.id,
+    mediaLabel: media.label,
+    text
+  };
 }
 
 function createMissingSourceMessage(requiresSourceImage: boolean, requiresSourceVideo: boolean): string {
