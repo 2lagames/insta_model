@@ -239,10 +239,10 @@ describe("studio preview layout", () => {
 
   it("appends every generated prompt to the latest prompt document", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
-    const promptCreationStart = appSource.indexOf("async function createSelectedPrompts");
+    const promptCreationStart = appSource.indexOf("async function createPromptsForMedia");
     const promptCreation = appSource.slice(promptCreationStart, appSource.indexOf("async function handleGenerateImagePrompts", promptCreationStart));
 
-    expect(promptCreation).toContain("for (const media of selectedPromptMedia)");
+    expect(promptCreation).toContain("for (const media of promptMedia)");
     expect(promptCreation).not.toContain("missingPromptMedia");
     expect(promptCreation).toContain("appendPromptDocument");
     expect(promptCreation).toContain("promptDocumentsRef.current");
@@ -268,8 +268,19 @@ describe("studio preview layout", () => {
     const imageHandlerStart = appSource.indexOf("async function handleGenerateImages");
     const imageHandler = appSource.slice(imageHandlerStart, appSource.indexOf("async function handleGenerateVideos", imageHandlerStart));
 
-    expect(imageHandler).toContain("createRunningHubGenerationJobs");
+    expect(imageHandler).toContain("prepareRunningHubGenerationJobs");
     expect(imageHandler).not.toContain("Write or generate a prompt for every selected Media item before image generation.");
+  });
+
+  it("stores a missing prompt before direct image generation uses it", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const imageHandlerStart = appSource.indexOf("async function handleGenerateImages");
+    const imageHandler = appSource.slice(imageHandlerStart, appSource.indexOf("async function handleGenerateVideos", imageHandlerStart));
+
+    expect(imageHandler).toContain("prepareRunningHubGenerationJobs");
+    expect(imageHandler).toContain("promptEntriesByMediaId");
+    expect(imageHandler).toContain("generateAndStorePrompt: async (media, ollamaPresetId)");
+    expect(imageHandler).toContain("await createPromptsForMedia([media], ollamaPresetId, abortController.signal)");
   });
 
   it("shows a cancellation action in the generation workspace and uses IMAGE labels", () => {

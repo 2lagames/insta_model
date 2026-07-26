@@ -38,7 +38,7 @@ import {
   type PromptDocument
 } from "./lib/promptDocuments";
 import type { PromptMediaInput } from "./lib/promptTypes";
-import { createRunningHubGenerationJobs } from "./lib/runningHubJobs";
+import { createRunningHubGenerationJobs, prepareRunningHubGenerationJobs } from "./lib/runningHubJobs";
 import { createStatusLogText } from "./lib/statusLog";
 import { studioIds, type RunningHubBinding } from "./lib/studioBindings";
 import { nextPresetDisplayId, reorderStudioActionButtons, type OllamaPreset, type RunningHubInstanceType, type RunningHubWorkflowPreset, type StudioActionButton, type StudioActionType } from "./lib/generationPresets";
@@ -531,16 +531,25 @@ export default function App() {
     }
   }
 
-  async function createSelectedPrompts(ollamaPresetId: string, signal?: AbortSignal): Promise<Array<{ mediaId: string; label: string; prompt: string }>> {
-    const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
+  async function createPromptsForMedia(
+    promptMedia: PromptMediaInput[],
+    ollamaPresetId: string,
+    signal?: AbortSignal
+  ): Promise<Array<{ mediaId: string; label: string; prompt: string }>> {
     let generatedPrompts: Array<{ mediaId: string; label: string; prompt: string }> = [];
-    for (const media of selectedPromptMedia) {
+    for (const media of promptMedia) {
       const generated = await generateImagePromptsWithOptions([media], { ollamaPresetId, signal });
       const generatedPrompt = generated.prompts[0];
       if (!generatedPrompt) {
         continue;
       }
-      const nextDocuments = appendPromptDocument(promptDocumentsRef.current, generatedPrompt);
+      const documentsWithPrefix = ensurePromptDocument(promptDocumentsRef.current, {
+        mediaId: media.id,
+        label: media.label,
+        prompt: selectedGenerationPrefixRef.current,
+        managedPrefix: selectedGenerationPrefixRef.current
+      });
+      const nextDocuments = appendPromptDocument(documentsWithPrefix, generatedPrompt);
       const appendedDocument = nextDocuments.find((document) => document.mediaId === generatedPrompt.mediaId)!;
       const prompt = {
         ...generatedPrompt,
@@ -557,10 +566,15 @@ export default function App() {
       setIsMediaSessionReset(false);
     }
 
-    const promptByMediaId = new Map<string, string>([
-      ...promptDocuments.map((document) => [document.mediaId, getCurrentPrompt(document)] as const),
-      ...generatedPrompts.map((prompt) => [prompt.mediaId, prompt.prompt] as const)
-    ]);
+    return generatedPrompts;
+  }
+
+  async function createSelectedPrompts(ollamaPresetId: string, signal?: AbortSignal): Promise<Array<{ mediaId: string; label: string; prompt: string }>> {
+    const selectedPromptMedia = createSelectedPromptMedia(mediaMaterials, selectedForGeneration, currentSession);
+    await createPromptsForMedia(selectedPromptMedia, ollamaPresetId, signal);
+    const promptByMediaId = new Map<string, string>(
+      promptDocumentsRef.current.map((document) => [document.mediaId, getCurrentPrompt(document)])
+    );
     return selectedPromptMedia.flatMap((media) => {
       const prompt = promptByMediaId.get(media.id);
       return prompt === undefined ? [] : [{ mediaId: media.id, label: media.label, prompt }];
@@ -687,14 +701,35 @@ export default function App() {
     setIsGeneratingImages(true);
     const abortController = new AbortController();
     generationAbortControllerRef.current = abortController;
-    recordStatus({ tone: "running", message: "Sending the inputs configured for the selected RunningHub workflow." });
     try {
-      const promptsByMediaId = new Map(promptDocuments.map((document) => [document.mediaId, getCurrentPrompt(document)]));
-      const workflowJobs = createRunningHubGenerationJobs({
+      const promptPrefixesByMediaId = createPromptPrefixRecord(promptDocumentsRef.current);
+      const promptEntriesByMediaId = new Map(promptDocumentsRef.current.map((document) => [
+        document.mediaId,
+        {
+          value: getCurrentPrompt(document),
+          managedPrefix: promptPrefixesByMediaId[document.mediaId] ?? ""
+        }
+      ]));
+      let automaticPromptGenerationStarted = false;
+      const workflowJobs = await prepareRunningHubGenerationJobs({
         bindings: workflow.bindings,
         selectedMedia: selectedPromptMedia,
-        promptsByMediaId
+        promptEntriesByMediaId,
+        studioActionButtons,
+        ollamaPresets,
+        hasOllamaCloudApiKey: connections.hasOllamaCloudApiKey === true,
+        generateAndStorePrompt: async (media, ollamaPresetId) => {
+          if (!automaticPromptGenerationStarted) {
+            automaticPromptGenerationStarted = true;
+            setIsGeneratingPrompt(true);
+            recordStatus({ tone: "running", message: "Generating missing prompts before image generation." });
+          }
+          const generatedPrompts = await createPromptsForMedia([media], ollamaPresetId, abortController.signal);
+          return generatedPrompts[0]?.prompt ?? "";
+        }
       });
+      setIsGeneratingPrompt(false);
+      recordStatus({ tone: "running", message: "Sending the inputs configured for the selected RunningHub workflow." });
       const imageJobs = repeatImageGenerationJobs(workflowJobs, imageGenerationsPerMedia);
       for (const [batchIndex, imageJob] of imageJobs.entries()) {
         const generated = await generateImagesWithOptions([imageJob], {
@@ -715,6 +750,7 @@ export default function App() {
         recordStatus({ tone: "error", message: toErrorMessage(error) });
       }
     } finally {
+      setIsGeneratingPrompt(false);
       setIsGeneratingImages(false);
       if (generationAbortControllerRef.current === abortController) {
         generationAbortControllerRef.current = null;
