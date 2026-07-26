@@ -169,6 +169,8 @@ describe("runRunningHubImageGeneration", () => {
     const tempDir = await mkdtemp(join(tmpdir(), "runninghub-video-output-"));
     const videoPath = join(tempDir, "source.mp4");
     const generatedImagePath = join(tempDir, "generated.png");
+    const phases: string[] = [];
+    let queryCompleted = false;
     await writeFile(videoPath, "video");
     await writeFile(generatedImagePath, "image");
 
@@ -184,11 +186,15 @@ describe("runRunningHubImageGeneration", () => {
         expect(JSON.parse(String(init?.body)).nodeInfoList).toEqual([
           { nodeId: "18", fieldName: "video", fieldValue: "openapi/source.mp4" },
           { nodeId: "39", fieldName: "image", fieldValue: "openapi/generated.png" },
-          { nodeId: "6", fieldName: "video_prompt", fieldValue: "Animate the scene" }
+          { nodeId: "6", fieldName: "image_prompt", fieldValue: "Preserve the appearance" },
+          { nodeId: "7", fieldName: "video_prompt", fieldValue: "Animate the movement" }
         ]);
         return new Response(JSON.stringify({ taskId: "video-task", status: "RUNNING", results: null }));
       }
-      if (requestUrl.pathname.endsWith("/openapi/v2/query")) return new Response(JSON.stringify({ taskId: "video-task", status: "SUCCESS", results: [{ url: "https://cdn.example.com/video.mp4", outputType: "mp4" }] }));
+      if (requestUrl.pathname.endsWith("/openapi/v2/query")) {
+        queryCompleted = true;
+        return new Response(JSON.stringify({ taskId: "video-task", status: "SUCCESS", results: [{ url: "https://cdn.example.com/video.mp4", outputType: "mp4" }] }));
+      }
       if (requestUrl.hostname === "cdn.example.com") return new Response(Buffer.from("mp4"), { headers: { "Content-Type": "video/mp4" } });
       throw new Error(`Unexpected request: ${requestUrl.toString()}`);
     }) as typeof fetch;
@@ -206,14 +212,27 @@ describe("runRunningHubImageGeneration", () => {
           bindings: [
             { nodeId: "18", fieldName: "video", studioId: "3" },
             { nodeId: "39", fieldName: "image", studioId: "4" },
-            { nodeId: "6", fieldName: "video_prompt", studioId: "5" }
+            { nodeId: "6", fieldName: "image_prompt", studioId: "2" },
+            { nodeId: "7", fieldName: "video_prompt", studioId: "5" }
           ]
         },
-        jobs: [{ mediaId: "reel", label: "Reel", videoPath, generatedImagePath, prompt: "Animate the scene" }]
+        jobs: [{
+          mediaId: "reel",
+          label: "Reel",
+          videoPath,
+          generatedImagePath,
+          imagePrompt: "Preserve the appearance",
+          videoPrompt: "Animate the movement"
+        }],
+        onPhase: (phase) => {
+          if (phase === "downloading") expect(queryCompleted).toBe(true);
+          phases.push(phase);
+        }
       });
 
       expect(result.item.mediaType).toBe("video");
       expect(result.assets).toEqual([expect.objectContaining({ mediaType: "video", files: { video: expect.stringMatching(/^\/output\/\d{8}\/video-task-video-1\.mp4$/) } })]);
+      expect(phases).toEqual(["uploading", "submitting", "running", "downloading"]);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

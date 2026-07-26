@@ -426,6 +426,8 @@ app.post("/api/generation/images", async (request, response) => {
         imagePath: resolveStudioMediaPath(job.sourceImage?.imagePath ?? job.media.imagePath),
         videoPath: job.media.videoPath ? resolveStudioMediaPath(job.media.videoPath) : undefined,
         generatedImagePath: resolveRunningHubGeneratedImagePath(job),
+        imagePrompt: job.imagePrompt?.text,
+        videoPrompt: job.videoPrompt?.text,
         prompt: job.prompt
       })),
       onStatus: (event) => activityLog.publish(event),
@@ -489,6 +491,8 @@ app.post("/api/generation/videos", async (request, response) => {
         imagePath: resolveStudioMediaPath(job.sourceImage?.imagePath ?? job.media.imagePath),
         videoPath: job.media.videoPath ? resolveStudioMediaPath(job.media.videoPath) : undefined,
         generatedImagePath: resolveRunningHubGeneratedImagePath(job),
+        imagePrompt: job.imagePrompt?.text,
+        videoPrompt: job.videoPrompt?.text,
         prompt: job.prompt
       })),
       onStatus: (event) => activityLog.publish(event),
@@ -586,6 +590,8 @@ async function executeQueuedGeneration(
       imagePath: resolveStudioMediaPath(sourceJob.sourceImage?.imagePath ?? sourceJob.media.imagePath),
       videoPath: sourceJob.media.videoPath ? resolveStudioMediaPath(sourceJob.media.videoPath) : undefined,
       generatedImagePath: resolveRunningHubGeneratedImagePath(sourceJob),
+      imagePrompt: sourceJob.imagePrompt?.text,
+      videoPrompt: sourceJob.videoPrompt?.text,
       prompt: sourceJob.prompt
     }],
     onStatus: (event: { tone: "running" | "ready" | "error"; message: string; source: "runninghub" }) => activityLog.publish(event),

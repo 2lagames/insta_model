@@ -28,7 +28,9 @@ export type RunningHubPromptJob = {
   mediaId: string;
   label: string;
   imagePath?: string;
+  imagePrompt?: string;
   prompt?: string;
+  videoPrompt?: string;
   videoPath?: string;
   generatedImagePath?: string;
 };
@@ -173,7 +175,7 @@ async function runRunningHubGeneration(options: RunningHubGenerationOptions, out
         fetchImpl,
         config: options.config,
         bindings,
-        prompt: job.prompt,
+        prompt: job.imagePrompt ?? job.videoPrompt ?? job.prompt,
         fieldValues,
         signal: options.signal
       });
@@ -183,7 +185,6 @@ async function runRunningHubGeneration(options: RunningHubGenerationOptions, out
     await options.onPhase?.("running");
     throwIfAborted(options.signal);
 
-    await options.onPhase?.("downloading");
     options.onStatus?.({
       tone: "running",
       source: "runninghub",
@@ -200,6 +201,7 @@ async function runRunningHubGeneration(options: RunningHubGenerationOptions, out
       signal: options.signal
     });
 
+    await options.onPhase?.("downloading");
     options.onStatus?.({
       tone: "running",
       source: "runninghub",
@@ -367,7 +369,9 @@ async function resolveStudioFieldValues(options: {
 
   for (const binding of options.bindings) {
     if (binding.studioId === "2" || binding.studioId === "5") {
-      const prompt = options.job.prompt?.trim();
+      const prompt = (binding.studioId === "2"
+        ? options.job.imagePrompt ?? options.job.prompt
+        : options.job.videoPrompt ?? options.job.prompt)?.trim();
       if (!prompt) {
         throw new Error(`Studio ID ${binding.studioId} has no value for this media item.`);
       }
