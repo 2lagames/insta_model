@@ -56,6 +56,18 @@ describe("studio preview layout", () => {
     expect(cssSource).toContain("height: clamp(560px, 68vh, 780px)");
   });
 
+  it("publishes each completed queue output to Generated Media before server reconciliation", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const queueEffectStart = appSource.indexOf("const applySnapshot = (jobs: GenerationJob[]) =>");
+    const queueEffect = appSource.slice(queueEffectStart, appSource.indexOf("useEffect(() => {\n    getHealth()", queueEffectStart));
+
+    expect(queueEffect).toContain("getNewGenerationOutputIds");
+    expect(queueEffect).toContain("setItems((current) =>");
+    expect(queueEffect).toContain("setSessionMediaItemIds((current) =>");
+    expect(queueEffect).toContain("setCurrentSession((current) =>");
+    expect(queueEffect.indexOf("setItems((current) =>")).toBeLessThan(queueEffect.indexOf("const loadedSession = await listImports()"));
+  });
+
   it("aligns source and generated media columns at the top without stretching the studio panels", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const cssSource = readFileSync("src/App.css", "utf8");

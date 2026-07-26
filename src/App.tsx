@@ -23,6 +23,13 @@ import {
   type PublicConnections
 } from "./lib/api";
 import type { GenerationJob } from "./lib/generationJobs";
+import {
+  filterGenerationJobs,
+  getGenerationStatusPresentation,
+  getNewGenerationOutputIds,
+  summarizeGenerationJobs,
+  type GenerationQueueFilter
+} from "./lib/generationQueueView";
 import type { CurrentMediaSession, ImportItem, SceneBible } from "./lib/importTypes";
 import { validateInstagramUrl } from "./lib/instagramUrl";
 import { createMediaMaterials, createSessionMediaMaterials, type MediaMaterial } from "./lib/mediaMaterials";
@@ -127,6 +134,8 @@ export default function App() {
   const promptDocumentsRef = useRef<PromptDocument[]>([]);
   const selectedGenerationPrefixRef = useRef("");
   const generationPrefixSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const generationSessionRefreshQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const observedGenerationOutputIdsRef = useRef(new Set<string>());
   const promptAutosaveRevisionRef = useRef(0);
   const isPromptAutosaveReadyRef = useRef(false);
   const localMediaInputRef = useRef<HTMLInputElement | null>(null);
@@ -217,21 +226,55 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void listGenerationJobs().then(setGenerationJobs).catch((error: unknown) => {
+    const applySnapshot = (jobs: GenerationJob[]) => {
+      setGenerationJobs(jobs);
+      const newOutputIds = getNewGenerationOutputIds(jobs, observedGenerationOutputIdsRef.current);
+      for (const outputId of newOutputIds) observedGenerationOutputIdsRef.current.add(outputId);
+      if (newOutputIds.length === 0) return;
+
+      const newOutputIdSet = new Set(newOutputIds);
+      const newOutputs = jobs.flatMap((job) => (
+        job.output && newOutputIdSet.has(job.output.id) ? [job.output] : []
+      ));
+      setItems((current) => [
+        ...newOutputs,
+        ...current.filter((item) => !newOutputIdSet.has(item.id))
+      ]);
+      setSessionMediaItemIds((current) => [
+        ...current.filter((itemId) => !newOutputIdSet.has(itemId)),
+        ...newOutputIds
+      ]);
+      setCurrentSession((current) => ({
+        ...current,
+        itemIds: [
+          ...current.itemIds.filter((itemId) => !newOutputIdSet.has(itemId)),
+          ...newOutputIds
+        ]
+      }));
+      setIsMediaSessionReset(false);
+
+      generationSessionRefreshQueueRef.current = generationSessionRefreshQueueRef.current
+        .then(async () => {
+          const loadedSession = await listImports();
+          setItems(loadedSession.items);
+          setCurrentSession(loadedSession.session);
+          setSessionMediaItemIds(loadedSession.session.itemIds);
+          setIsMediaSessionReset(loadedSession.session.itemIds.length === 0);
+        })
+        .catch((error: unknown) => {
+          for (const outputId of newOutputIds) observedGenerationOutputIdsRef.current.delete(outputId);
+          recordStatus({ tone: "error", message: `Не удалось обновить Generated Media: ${toErrorMessage(error)}` });
+        });
+    };
+
+    void listGenerationJobs().then(applySnapshot).catch((error: unknown) => {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
     });
     const events = new EventSource("/api/generation-events");
     events.addEventListener("generation-snapshot", (event) => {
       try {
         const jobs = (JSON.parse((event as MessageEvent).data) as { jobs?: GenerationJob[] }).jobs ?? [];
-        setGenerationJobs(jobs);
-        const outputs = jobs.flatMap((job) => job.output ? [job.output] : []);
-        if (outputs.length > 0) {
-          setItems((current) => [
-            ...outputs,
-            ...current.filter((item) => !outputs.some((output) => output.id === item.id))
-          ]);
-        }
+        applySnapshot(jobs);
       } catch {
         recordStatus({ tone: "error", message: "Could not parse generation queue event." });
       }
@@ -985,7 +1028,7 @@ export default function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell app-shell-${activeTab}`}>
       <nav className="app-tabs" aria-label="App sections">
         <button
           className={activeTab === "studio" ? "active" : ""}
@@ -1186,36 +1229,57 @@ function GenerationQueuePage({
   onCancel: (jobId: string) => void;
   onRetry: (jobId: string, ambiguous: boolean) => void;
 }) {
-  const [filter, setFilter] = useState<"active" | "failed" | "completed" | "all">("active");
-  const visibleJobs = jobs.filter((job) => {
-    if (filter === "active") return !["succeeded", "failed", "canceled"].includes(job.status);
-    if (filter === "failed") return job.status === "failed" || job.status === "recovery_required";
-    if (filter === "completed") return job.status === "succeeded" || job.status === "canceled";
-    return true;
-  });
+  const [filter, setFilter] = useState<GenerationQueueFilter>("active");
+  const visibleJobs = filterGenerationJobs(jobs, filter);
+  const summary = summarizeGenerationJobs(jobs);
+  const filterOptions: Array<{ id: GenerationQueueFilter; label: string; count: number }> = [
+    { id: "active", label: "Активные", count: summary.active },
+    { id: "failed", label: "Ошибки", count: summary.failed },
+    { id: "completed", label: "Готовые", count: summary.completed },
+    { id: "all", label: "Все", count: jobs.length }
+  ];
 
   return <section className="queue-page">
     <div className="queue-header">
-      <div><div className="panel-label">Queue</div><h2>Очередь генерации</h2></div>
-      <div className="queue-filters">
-        {(["active", "failed", "completed", "all"] as const).map((value) => (
-          <button className={filter === value ? "active" : ""} key={value} onClick={() => setFilter(value)} type="button">{value}</button>
+      <div>
+        <div className="panel-label">Queue</div>
+        <h1>Очередь генерации</h1>
+        <p>Изображения и видео выполняются последовательно. Готовые результаты сразу появляются в Generated Media.</p>
+      </div>
+      <div aria-label="Фильтр очереди" className="queue-filters">
+        {filterOptions.map((option) => (
+          <button aria-pressed={filter === option.id} className={filter === option.id ? "active" : ""} key={option.id} onClick={() => setFilter(option.id)} type="button">
+            {option.label}<span>{option.count}</span>
+          </button>
         ))}
       </div>
     </div>
     <div className="queue-list">
       {visibleJobs.length === 0 ? <div className="queue-empty">В этой группе пока нет заданий.</div> : visibleJobs.map((job) => {
         const outputPath = job.output?.files.video ?? job.output?.files.image;
+        const previewPath = job.input.job.media.imagePath ?? job.input.job.sourceImage?.imagePath ?? job.input.job.generatedImage?.imagePath;
         const canCancel = ["queued", "preparing", "uploading", "submitting", "running", "downloading"].includes(job.status);
         const canRetry = job.status === "failed" || job.status === "recovery_required";
+        const status = getGenerationStatusPresentation(job.status);
         return <article className={`queue-row queue-${job.status}`} key={job.id}>
-          <div><strong>{job.kind === "image" ? "Image" : "Video"} · {job.input.workflow.displayId}</strong><div>{job.input.job.media.label}</div></div>
-          <div className="queue-status">{job.status === "canceling" ? "Отмена…" : job.status}</div>
+          <div className="queue-preview">
+            {previewPath ? <img alt="" src={previewPath} /> : <span>{job.kind === "image" ? "I" : "V"}</span>}
+          </div>
+          <div className="queue-job-info">
+            <div className="queue-job-title"><strong>{job.kind === "image" ? "Изображение" : "Видео"}</strong><span>{job.input.workflow.displayId}</span></div>
+            <div className="queue-media-label">{job.input.job.media.label}</div>
+            <div className="queue-meta">Попытка {job.attempt} · {new Date(job.createdAt).toLocaleString()}</div>
+          </div>
+          <div className="queue-progress">
+            <span className={`queue-status queue-tone-${status.tone}`}>{status.label}</span>
+            {status.tone === "running" ? <span aria-hidden="true" className="queue-progress-track"><span /></span> : null}
+            {job.providerTaskId ? <span className="queue-task-id">Task {job.providerTaskId}</span> : null}
+          </div>
           <div className="queue-error">{job.error?.message ?? ""}</div>
           <div className="queue-actions">
-            {canCancel ? <button onClick={() => onCancel(job.id)} type="button">Cancel</button> : null}
-            {canRetry ? <button onClick={() => onRetry(job.id, job.status === "recovery_required")} type="button">Retry</button> : null}
-            {outputPath ? <a href={outputPath} rel="noreferrer" target="_blank">Open</a> : null}
+            {canCancel ? <button className="queue-action-secondary" onClick={() => onCancel(job.id)} type="button">Отменить</button> : null}
+            {canRetry ? <button className="queue-action-primary" onClick={() => onRetry(job.id, job.status === "recovery_required")} type="button">Повторить</button> : null}
+            {outputPath ? <a className="queue-action-primary" href={outputPath} rel="noreferrer" target="_blank">Открыть</a> : null}
           </div>
         </article>;
       })}
