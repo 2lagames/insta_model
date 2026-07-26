@@ -3,6 +3,7 @@ import type { PromptMediaInput } from "./promptTypes";
 import type { RunningHubGenerationJobInput } from "./runningHubJobs";
 import type { RunningHubBinding } from "./studioBindings";
 import type { OllamaPreset, RunningHubWorkflowPreset, StudioActionButton } from "./generationPresets";
+import type { GenerationJob } from "./generationJobs";
 
 type ImportsResponse = {
   items: ImportItem[];
@@ -334,6 +335,56 @@ export async function cancelGeneration(): Promise<{ cancelled: boolean }> {
   const response = await apiFetch("/api/generation/cancel", { method: "POST" });
   await assertOk(response);
   return await response.json() as { cancelled: boolean };
+}
+
+export async function listGenerationJobs(): Promise<GenerationJob[]> {
+  const response = await apiFetch("/api/generation-jobs");
+  await assertOk(response);
+  return ((await response.json()) as { jobs?: GenerationJob[] }).jobs ?? [];
+}
+
+export async function enqueueImageJobs(
+  jobs: ImageGenerationJobInput[],
+  runningHubWorkflowPresetId: string
+): Promise<GenerationJob[]> {
+  return await enqueueGenerationJobs("image", jobs, runningHubWorkflowPresetId);
+}
+
+export async function enqueueVideoJobs(
+  jobs: VideoGenerationJobInput[],
+  runningHubWorkflowPresetId: string
+): Promise<GenerationJob[]> {
+  return await enqueueGenerationJobs("video", jobs, runningHubWorkflowPresetId);
+}
+
+export async function cancelGenerationJob(jobId: string): Promise<GenerationJob> {
+  const response = await apiFetch(`/api/generation-jobs/${jobId}/cancel`, { method: "POST" });
+  await assertOk(response);
+  return ((await response.json()) as { job: GenerationJob }).job;
+}
+
+export async function retryGenerationJob(jobId: string, confirmAmbiguous = false): Promise<GenerationJob> {
+  const response = await apiFetch(`/api/generation-jobs/${jobId}/retry`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmAmbiguous })
+  });
+  await assertOk(response);
+  return ((await response.json()) as { job: GenerationJob }).job;
+}
+
+async function enqueueGenerationJobs(
+  kind: "image" | "video",
+  jobs: RunningHubGenerationJobInput[],
+  runningHubWorkflowPresetId: string
+): Promise<GenerationJob[]> {
+  const response = await apiFetch(`/api/generation-jobs/${kind}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jobs, runningHubWorkflowPresetId })
+  });
+  await assertOk(response);
+  return ((await response.json()) as { jobs?: GenerationJob[] }).jobs ?? [];
 }
 
 function createEmptySession(itemIds: string[] = []): CurrentMediaSession {

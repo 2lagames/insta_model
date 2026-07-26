@@ -49,6 +49,8 @@ export type RunningHubGenerationResult = {
   assets: ImportAsset[];
 };
 
+export type RunningHubGenerationPhase = "uploading" | "submitting" | "running" | "downloading";
+
 type RunningHubGenerationOptions = {
   outputDir: string;
   config: RunningHubConfig;
@@ -60,7 +62,9 @@ type RunningHubGenerationOptions = {
   now?: Date;
   onStatus?: StatusCallback;
   signal?: AbortSignal;
-  onTaskCreated?: (taskId: string) => void;
+  onTaskCreated?: (taskId: string) => void | Promise<void>;
+  onPhase?: (phase: RunningHubGenerationPhase) => void | Promise<void>;
+  resumeTaskId?: string;
   batchPosition?: number;
   batchTotal?: number;
 };
@@ -133,46 +137,53 @@ async function runRunningHubGeneration(options: RunningHubGenerationOptions, out
   for (const [jobIndex, job] of options.jobs.entries()) {
     throwIfAborted(options.signal);
     const passLabel = `${job.label} (${batchPosition + jobIndex}/${batchTotal})`;
-    options.onStatus?.({
-      tone: "running",
-      source: "runninghub",
-      message: `Uploading ${sourceInputLabel} for ${passLabel}.`
-    });
+    let taskId = options.resumeTaskId;
+    if (!taskId) {
+      await options.onPhase?.("uploading");
+      options.onStatus?.({
+        tone: "running",
+        source: "runninghub",
+        message: `Uploading ${sourceInputLabel} for ${passLabel}.`
+      });
 
-    let fieldValues: Map<string, string>;
-    try {
-      fieldValues = await resolveStudioFieldValues({
-        bindings,
-        job,
-        apiKey: options.config.apiKey,
-        fetchImpl,
+      let fieldValues: Map<string, string>;
+      try {
+        fieldValues = await resolveStudioFieldValues({
+          bindings,
+          job,
+          apiKey: options.config.apiKey,
+          fetchImpl,
+          baseUrl,
+          signal: options.signal
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "unknown error";
+        throw new Error(`Could not prepare Studio inputs for ${job.label}: ${message}`);
+      }
+
+      await options.onPhase?.("submitting");
+      options.onStatus?.({
+        tone: "running",
+        source: "runninghub",
+        message: `Creating RunningHub ${options.config.instanceType === "standard" ? "Standard" : "Plus"} task for ${passLabel}.`
+      });
+
+      taskId = await createTask({
         baseUrl,
+        fetchImpl,
+        config: options.config,
+        bindings,
+        prompt: job.prompt,
+        fieldValues,
         signal: options.signal
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "unknown error";
-      throw new Error(`Could not prepare Studio inputs for ${job.label}: ${message}`);
+      await options.onTaskCreated?.(taskId);
     }
-
-    options.onStatus?.({
-      tone: "running",
-      source: "runninghub",
-      message: `Creating RunningHub Plus task for ${passLabel}.`
-    });
-
-    const taskId = await createTask({
-      baseUrl,
-      fetchImpl,
-      config: options.config,
-      bindings,
-      prompt: job.prompt,
-      fieldValues,
-      signal: options.signal
-    });
     taskIds.push(taskId);
-    options.onTaskCreated?.(taskId);
+    await options.onPhase?.("running");
     throwIfAborted(options.signal);
 
+    await options.onPhase?.("downloading");
     options.onStatus?.({
       tone: "running",
       source: "runninghub",

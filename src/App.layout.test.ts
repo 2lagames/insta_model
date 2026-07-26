@@ -44,8 +44,8 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("Локальная Ollama");
     expect(appSource).toContain("Workflow bindings");
     expect(appSource).toContain('aria-label="Отменить изменение промта"');
-    expect(appSource).toContain("batchPosition: batchIndex + 1");
-    expect(appSource).toContain("batchTotal: imageJobs.length");
+    expect(appSource).toContain("enqueueImageJobs(imageJobs, runningHubWorkflowPresetId)");
+    expect(appSource).toContain("Queue ·");
     expect(appSource).not.toContain("workflow-file-control");
     expect(cssSource).toContain("aspect-ratio: 9 / 16");
     expect(cssSource).toContain(".gallery-select");
@@ -258,7 +258,7 @@ describe("studio preview layout", () => {
     expect(appSource).toContain('if (studioId === "2") return "2 · Prompt image"');
     expect(appSource).toContain('if (studioId === "5") return "5 · Prompt video"');
     expect(videoHandler).toContain("createRunningHubGenerationJobs");
-    expect(videoHandler).toContain("generateVideosWithOptions");
+    expect(videoHandler).toContain("enqueueVideoJobs");
     expect(videoHandler).not.toContain("Select exactly one source video and one generated image before video generation.");
     expect(videoHandler).not.toContain("Write or generate a prompt for the selected source video before video generation.");
   });
@@ -292,18 +292,14 @@ describe("studio preview layout", () => {
     expect(appSource).toContain("Настройки");
   });
 
-  it("adds each generated image to the studio before starting the next image job", () => {
+  it("adds independent image repetitions to the persistent queue", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const generationStart = appSource.indexOf("async function handleGenerateImages(runningHubWorkflowPresetId: string)");
     const generationHandler = appSource.slice(generationStart, appSource.indexOf("function handleCancelGeneration", generationStart));
 
-    expect(generationHandler).toContain("for (const [batchIndex, imageJob] of imageJobs.entries())");
-    expect(generationHandler).toContain("await generateImagesWithOptions([imageJob], {");
-    expect(generationHandler).toContain("batchPosition: batchIndex + 1");
-    expect(generationHandler).toContain("batchTotal: imageJobs.length");
-    expect(generationHandler).toContain("setItems((current) => [generated.item");
-    expect(generationHandler).toContain("setCurrentSession(generated.session)");
-    expect(generationHandler).toContain("setSessionMediaItemIds(generated.session.itemIds)");
+    expect(generationHandler).toContain("repeatImageGenerationJobs");
+    expect(generationHandler).toContain("await enqueueImageJobs(imageJobs, runningHubWorkflowPresetId)");
+    expect(generationHandler).toContain("Добавлено в очередь");
   });
 
   it("lets users choose one to ten image generations per selected media item", () => {

@@ -14,6 +14,9 @@ import { generateOllamaPrompt, listOllamaModels } from "./ollamaClient";
 import { getOllamaConfigurationForPreset } from "./ollamaConfiguration";
 import type { OllamaPreset, RunningHubInstanceType, RunningHubWorkflowPreset, StudioActionButton } from "../src/lib/generationPresets";
 import { GenerationCancelledError, GenerationController, type GenerationOperation } from "./generationController";
+import { GenerationEvents } from "./generationEvents";
+import { GenerationQueueStore } from "./generationQueueStore";
+import { GenerationWorker } from "./generationWorker";
 import { cancelRunningHubTask, runRunningHubImageGeneration, runRunningHubVideoGeneration } from "./runningHub";
 
 const port = Number(process.env.API_PORT ?? 4317);
@@ -25,6 +28,11 @@ const store = new ImportStore(dataDir);
 const connectionsStore = new ConnectionsStore(dataDir);
 const activityLog = new ActivityLog();
 const generationController = new GenerationController(cancelRunningHubTask);
+const generationQueue = new GenerationQueueStore(dataDir);
+const generationEvents = new GenerationEvents();
+const generationWorker = new GenerationWorker(generationQueue, executeQueuedGeneration, () => {
+  void generationQueue.list().then((jobs) => generationEvents.publish(jobs));
+});
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -334,6 +342,45 @@ app.post("/api/generation/image-prompts", async (request, response) => {
   }
 });
 
+app.get("/api/generation-events", (request, response) => {
+  const unsubscribe = generationEvents.subscribe(response);
+  request.on("close", unsubscribe);
+});
+
+app.get("/api/generation-jobs", async (_request, response) => {
+  response.json({ jobs: await generationQueue.list() });
+});
+
+app.post("/api/generation-jobs/image", async (request, response) => {
+  await enqueueGenerationJobs("image", request, response);
+});
+
+app.post("/api/generation-jobs/video", async (request, response) => {
+  await enqueueGenerationJobs("video", request, response);
+});
+
+app.post("/api/generation-jobs/:jobId/cancel", async (request, response) => {
+  try {
+    const job = await generationWorker.cancel(request.params.jobId);
+    response.json({ job });
+  } catch (error) {
+    response.status(400).json({ error: toErrorMessage(error) });
+  }
+});
+
+app.post("/api/generation-jobs/:jobId/retry", async (request, response) => {
+  try {
+    const job = await generationQueue.retry(request.params.jobId, {
+      confirmAmbiguous: request.body?.confirmAmbiguous === true
+    });
+    generationWorker.wake();
+    generationEvents.publish(await generationQueue.list());
+    response.json({ job });
+  } catch (error) {
+    response.status(400).json({ error: toErrorMessage(error) });
+  }
+});
+
 app.post("/api/generation/images", async (request, response) => {
   let generation: GenerationOperation | undefined;
   try {
@@ -472,8 +519,88 @@ app.post("/api/generation/cancel", async (_request, response) => {
   response.json({ cancelled });
 });
 
+async function enqueueGenerationJobs(
+  kind: "image" | "video",
+  request: express.Request,
+  response: express.Response
+): Promise<void> {
+  try {
+    const jobs = parseRunningHubGenerationJobs(request.body?.jobs);
+    const workflowPresetId = requiredString(
+      request.body?.runningHubWorkflowPresetId,
+      `Select a RunningHub workflow before ${kind} generation.`
+    );
+    const connections = await connectionsStore.readPrivate();
+    const workflow = getRunningHubWorkflows(connections).find((item) => item.id === workflowPresetId);
+    if (!workflow) throw new Error(`Select an available RunningHub workflow before ${kind} generation.`);
+    const queued = await generationQueue.createJobs(kind, jobs.map((job) => ({
+      workflowPresetId,
+      workflow,
+      job
+    })));
+    generationEvents.publish(await generationQueue.list());
+    generationWorker.wake();
+    activityLog.publish({
+      tone: "ready",
+      source: "generation",
+      message: `Added ${queued.length} ${kind} generation job(s) to Queue.`
+    });
+    response.status(202).json({ jobs: queued });
+  } catch (error) {
+    response.status(400).json({ error: toErrorMessage(error) });
+  }
+}
+
+async function executeQueuedGeneration(
+  queuedJob: import("../src/lib/generationJobs").GenerationJob,
+  context: import("./generationWorker").GenerationExecutionContext
+): Promise<ImportItem> {
+  const connections = await connectionsStore.readPrivate();
+  const workflow = queuedJob.input.workflow;
+  const sourceJob = queuedJob.input.job;
+  const options = {
+    outputDir,
+    config: {
+      apiKey: connections.runningHubApiKey ?? "",
+      workflowId: workflow.workflowId,
+      instanceType: requireRunningHubInstanceType(workflow),
+      bindings: workflow.bindings
+    },
+    jobs: [{
+      mediaId: sourceJob.media.id,
+      label: sourceJob.media.label,
+      imagePath: resolveStudioMediaPath(sourceJob.sourceImage?.imagePath ?? sourceJob.media.imagePath),
+      videoPath: sourceJob.media.videoPath ? resolveStudioMediaPath(sourceJob.media.videoPath) : undefined,
+      generatedImagePath: resolveRunningHubGeneratedImagePath(sourceJob),
+      prompt: sourceJob.prompt
+    }],
+    onStatus: (event: { tone: "running" | "ready" | "error"; message: string; source: "runninghub" }) => activityLog.publish(event),
+    signal: context.signal,
+    resumeTaskId: queuedJob.providerTaskId,
+    onTaskCreated: context.setTaskId,
+    onPhase: async (phase: import("./runningHub").RunningHubGenerationPhase) => {
+      if (phase !== "running") await context.setPhase(phase);
+    }
+  };
+  const result = queuedJob.kind === "image"
+    ? await runRunningHubImageGeneration(options)
+    : await runRunningHubVideoGeneration(options);
+  const currentSession = await store.readCurrentSession();
+  await store.saveItem(result.item);
+  await store.appendToCurrentSession(result.item.id, {
+    sceneBibles: currentSession.sceneBibles,
+    mediaSceneMap: {
+      ...currentSession.mediaSceneMap,
+      ...mapGeneratedAssetsToScenes(result.item, result.assets, [sourceJob.media], currentSession.mediaSceneMap)
+    }
+  });
+  return result.item;
+}
+
 const host = process.env.API_HOST ?? "127.0.0.1";
 
+await generationWorker.start();
+generationEvents.publish(await generationQueue.list());
 const httpServer = app.listen(port, host, () => {
   console.log(`Import API listening on http://localhost:${port}`);
 });

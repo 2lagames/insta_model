@@ -39,6 +39,8 @@ describe("createMediaMaterials", () => {
       image: "/input/20260626/post-1/video-001-first-frame.jpg",
       video: "/input/20260626/post-1/video-001.mp4"
     });
+    expect(createMediaMaterials(item)[1]?.selectionGroupId).toBe("post-1:asset-2");
+    expect(createMediaMaterials(item)[2]?.selectionGroupId).toBe("post-1:asset-2");
   });
 });
 

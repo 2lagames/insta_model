@@ -101,6 +101,44 @@ describe("cancelRunningHubTask", () => {
 describe("runRunningHubImageGeneration", () => {
   const sourceImagePath = fileURLToPath(import.meta.url);
 
+  it("resumes a persisted task id without creating a second RunningHub task", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "runninghub-resume-"));
+    let createRequests = 0;
+    const fetchImpl = (async (url: URL | RequestInfo) => {
+      const requestUrl = new URL(String(url));
+      if (requestUrl.pathname.endsWith("/openapi/v2/query")) {
+        return new Response(JSON.stringify({
+          taskId: "existing-task",
+          status: "SUCCESS",
+          results: [{ url: "https://cdn.example.com/result.png", outputType: "png" }]
+        }));
+      }
+      if (requestUrl.hostname === "cdn.example.com") return new Response("png");
+      createRequests += 1;
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+
+    try {
+      const result = await runRunningHubImageGeneration({
+        outputDir: join(tempDir, "output"),
+        baseUrl: "https://runninghub.example.com",
+        fetchImpl,
+        resumeTaskId: "existing-task",
+        config: {
+          apiKey: "key",
+          workflowId: "workflow",
+          bindings: [{ nodeId: "6", fieldName: "text", studioId: "2" }]
+        },
+        jobs: [{ mediaId: "media", label: "Image", prompt: "Prompt" }]
+      });
+
+      expect(createRequests).toBe(0);
+      expect(result.assets).toHaveLength(1);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects an empty prompt only when a prompt Studio ID is configured", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "runninghub-required-prompt-"));
     let requestCount = 0;

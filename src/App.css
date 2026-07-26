@@ -543,6 +543,78 @@ input {
   padding: 18px;
 }
 
+.queue-page {
+  padding: 20px;
+}
+
+.queue-header,
+.queue-row,
+.queue-filters,
+.queue-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.queue-header {
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.queue-filters .active {
+  border-color: #6da8ff;
+  color: #dcecff;
+}
+
+.queue-list {
+  display: grid;
+  gap: 10px;
+}
+
+.queue-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 130px minmax(160px, 1fr) auto;
+  padding: 12px;
+  border: 1px solid #303744;
+  border-radius: 10px;
+  background: #171b22;
+}
+
+.queue-status {
+  text-transform: capitalize;
+}
+
+.queue-error {
+  color: #ff9b9b;
+}
+
+.queue-actions {
+  justify-content: flex-end;
+}
+
+.queue-empty {
+  padding: 32px;
+  color: #9da8b8;
+  text-align: center;
+  border: 1px dashed #3b4350;
+  border-radius: 10px;
+}
+
+@media (max-width: 720px) {
+  .queue-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .queue-row {
+    grid-template-columns: 1fr;
+  }
+
+  .queue-actions {
+    justify-content: flex-start;
+  }
+}
+
 .connection-card {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(260px, 420px);

@@ -1,17 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   cancelGeneration,
+  cancelGenerationJob,
   clearConnectionKey,
+  enqueueImageJobs,
+  enqueueVideoJobs,
   generateImagePromptsWithOptions,
-  generateImagesWithOptions,
-  generateVideosWithOptions,
   getConnections,
   getHealth,
   importInstagramUrl,
   listImports,
+  listGenerationJobs,
   listOllamaModels,
   openImportsFolder,
   resetMediaSession,
+  retryGenerationJob,
   saveConnectionKey,
   saveConnections,
   saveSessionPrompts,
@@ -19,10 +22,11 @@ import {
   type ConnectionKeyName,
   type PublicConnections
 } from "./lib/api";
+import type { GenerationJob } from "./lib/generationJobs";
 import type { CurrentMediaSession, ImportItem, SceneBible } from "./lib/importTypes";
 import { validateInstagramUrl } from "./lib/instagramUrl";
 import { createMediaMaterials, createSessionMediaMaterials, type MediaMaterial } from "./lib/mediaMaterials";
-import { toggleAllMediaSelection, toggleMediaSelection } from "./lib/mediaSelection";
+import { toggleAllMediaSelection, toggleExclusiveMediaSelection } from "./lib/mediaSelection";
 import {
   appendPromptDocument,
   createPromptPrefixRecord,
@@ -43,7 +47,7 @@ import { createStatusLogText } from "./lib/statusLog";
 import { studioIds, type RunningHubBinding } from "./lib/studioBindings";
 import { nextPresetDisplayId, reorderStudioActionButtons, type OllamaPreset, type RunningHubInstanceType, type RunningHubWorkflowPreset, type StudioActionButton, type StudioActionType } from "./lib/generationPresets";
 
-type ActiveTab = "studio" | "connections";
+type ActiveTab = "studio" | "queue" | "connections";
 type StatusTone = "idle" | "running" | "error" | "ready";
 
 type StatusState = {
@@ -118,6 +122,7 @@ export default function App() {
   const [isRefreshingCloudModels, setIsRefreshingCloudModels] = useState(false);
   const [isRefreshingLocalModels, setIsRefreshingLocalModels] = useState(false);
   const [isSavingConnections, setIsSavingConnections] = useState(false);
+  const [generationJobs, setGenerationJobs] = useState<GenerationJob[]>([]);
   const [promptDocuments, setPromptDocumentsState] = useState<PromptDocument[]>([]);
   const promptDocumentsRef = useRef<PromptDocument[]>([]);
   const selectedGenerationPrefixRef = useRef("");
@@ -208,6 +213,29 @@ export default function App() {
       }
     });
 
+    return () => events.close();
+  }, []);
+
+  useEffect(() => {
+    void listGenerationJobs().then(setGenerationJobs).catch((error: unknown) => {
+      recordStatus({ tone: "error", message: toErrorMessage(error) });
+    });
+    const events = new EventSource("/api/generation-events");
+    events.addEventListener("generation-snapshot", (event) => {
+      try {
+        const jobs = (JSON.parse((event as MessageEvent).data) as { jobs?: GenerationJob[] }).jobs ?? [];
+        setGenerationJobs(jobs);
+        const outputs = jobs.flatMap((job) => job.output ? [job.output] : []);
+        if (outputs.length > 0) {
+          setItems((current) => [
+            ...outputs,
+            ...current.filter((item) => !outputs.some((output) => output.id === item.id))
+          ]);
+        }
+      } catch {
+        recordStatus({ tone: "error", message: "Could not parse generation queue event." });
+      }
+    });
     return () => events.close();
   }, []);
 
@@ -731,20 +759,9 @@ export default function App() {
       setIsGeneratingPrompt(false);
       recordStatus({ tone: "running", message: "Sending the inputs configured for the selected RunningHub workflow." });
       const imageJobs = repeatImageGenerationJobs(workflowJobs, imageGenerationsPerMedia);
-      for (const [batchIndex, imageJob] of imageJobs.entries()) {
-        const generated = await generateImagesWithOptions([imageJob], {
-          runningHubWorkflowPresetId,
-          signal: abortController.signal,
-          batchPosition: batchIndex + 1,
-          batchTotal: imageJobs.length
-        });
-        setItems((current) => [generated.item, ...current.filter((item) => item.id !== generated.item.id)]);
-        const generatedMedia = createMediaMaterials(generated.item);
-        setCurrentSession(generated.session);
-        setSessionMediaItemIds(generated.session.itemIds);
-        setIsMediaSessionReset(false);
-        setSelectedForGeneration((current) => current.filter((id) => !generatedMedia.some((material) => material.id === id)));
-      }
+      const queued = await enqueueImageJobs(imageJobs, runningHubWorkflowPresetId);
+      setGenerationJobs((current) => [...current, ...queued]);
+      recordStatus({ tone: "ready", message: `Добавлено в очередь: ${queued.length}` });
     } catch (error) {
       if (!isAbortError(error)) {
         recordStatus({ tone: "error", message: toErrorMessage(error) });
@@ -786,14 +803,9 @@ export default function App() {
         selectedMedia: selectedPromptMedia,
         promptsByMediaId
       });
-      const generated = await generateVideosWithOptions(jobs, {
-        runningHubWorkflowPresetId,
-        signal: abortController.signal
-      });
-      setItems((current) => [generated.item, ...current.filter((item) => item.id !== generated.item.id)]);
-      setCurrentSession(generated.session);
-      setSessionMediaItemIds(generated.session.itemIds);
-      setIsMediaSessionReset(false);
+      const queued = await enqueueVideoJobs(jobs, runningHubWorkflowPresetId);
+      setGenerationJobs((current) => [...current, ...queued]);
+      recordStatus({ tone: "ready", message: `Добавлено в очередь: ${queued.length}` });
     } catch (error) {
       if (!isAbortError(error)) {
         recordStatus({ tone: "error", message: toErrorMessage(error) });
@@ -983,6 +995,13 @@ export default function App() {
           Студия
         </button>
         <button
+          className={activeTab === "queue" ? "active" : ""}
+          onClick={() => setActiveTab("queue")}
+          type="button"
+        >
+          Queue · {generationJobs.filter((job) => !["succeeded", "failed", "canceled"].includes(job.status)).length}
+        </button>
+        <button
           className={activeTab === "connections" ? "active" : ""}
           onClick={() => setActiveTab("connections")}
           type="button"
@@ -1080,7 +1099,7 @@ export default function App() {
                     managedPrefix: selectedGenerationPrefix
                   }));
                 }}
-                onToggleMaterial={(materialId) => setSelectedForGeneration((current) => toggleMediaSelection(current, materialId))}
+                onToggleMaterial={(materialId) => setSelectedForGeneration((current) => toggleExclusiveMediaSelection(current, materialId, mediaMaterials))}
                 promptDocuments={promptDocuments}
                 selectedForGeneration={selectedForGeneration}
                 sourceMaterials={sourceMaterials}
@@ -1103,6 +1122,12 @@ export default function App() {
             status={status}
           />
         </>
+      ) : activeTab === "queue" ? (
+        <GenerationQueuePage
+          jobs={generationJobs}
+          onCancel={(jobId) => void cancelGenerationJob(jobId).catch((error: unknown) => recordStatus({ tone: "error", message: toErrorMessage(error) }))}
+          onRetry={(jobId, ambiguous) => void retryGenerationJob(jobId, ambiguous).then(() => listGenerationJobs()).then(setGenerationJobs).catch((error: unknown) => recordStatus({ tone: "error", message: toErrorMessage(error) }))}
+        />
       ) : (
         <section className="connections-page">
           <div className="panel-label">Настройки</div>
@@ -1150,6 +1175,52 @@ export default function App() {
       )}
     </main>
   );
+}
+
+function GenerationQueuePage({
+  jobs,
+  onCancel,
+  onRetry
+}: {
+  jobs: GenerationJob[];
+  onCancel: (jobId: string) => void;
+  onRetry: (jobId: string, ambiguous: boolean) => void;
+}) {
+  const [filter, setFilter] = useState<"active" | "failed" | "completed" | "all">("active");
+  const visibleJobs = jobs.filter((job) => {
+    if (filter === "active") return !["succeeded", "failed", "canceled"].includes(job.status);
+    if (filter === "failed") return job.status === "failed" || job.status === "recovery_required";
+    if (filter === "completed") return job.status === "succeeded" || job.status === "canceled";
+    return true;
+  });
+
+  return <section className="queue-page">
+    <div className="queue-header">
+      <div><div className="panel-label">Queue</div><h2>Очередь генерации</h2></div>
+      <div className="queue-filters">
+        {(["active", "failed", "completed", "all"] as const).map((value) => (
+          <button className={filter === value ? "active" : ""} key={value} onClick={() => setFilter(value)} type="button">{value}</button>
+        ))}
+      </div>
+    </div>
+    <div className="queue-list">
+      {visibleJobs.length === 0 ? <div className="queue-empty">В этой группе пока нет заданий.</div> : visibleJobs.map((job) => {
+        const outputPath = job.output?.files.video ?? job.output?.files.image;
+        const canCancel = ["queued", "preparing", "uploading", "submitting", "running", "downloading"].includes(job.status);
+        const canRetry = job.status === "failed" || job.status === "recovery_required";
+        return <article className={`queue-row queue-${job.status}`} key={job.id}>
+          <div><strong>{job.kind === "image" ? "Image" : "Video"} · {job.input.workflow.displayId}</strong><div>{job.input.job.media.label}</div></div>
+          <div className="queue-status">{job.status === "canceling" ? "Отмена…" : job.status}</div>
+          <div className="queue-error">{job.error?.message ?? ""}</div>
+          <div className="queue-actions">
+            {canCancel ? <button onClick={() => onCancel(job.id)} type="button">Cancel</button> : null}
+            {canRetry ? <button onClick={() => onRetry(job.id, job.status === "recovery_required")} type="button">Retry</button> : null}
+            {outputPath ? <a href={outputPath} rel="noreferrer" target="_blank">Open</a> : null}
+          </div>
+        </article>;
+      })}
+    </div>
+  </section>;
 }
 
 function Preview({

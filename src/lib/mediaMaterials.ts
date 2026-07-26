@@ -2,6 +2,8 @@ import type { ImportAsset, ImportItem } from "./importTypes";
 
 export type MediaMaterial = {
   id: string;
+  sourceAssetId: string;
+  selectionGroupId: string;
   importItem: ImportItem;
   mediaType: "image" | "video";
   label: string;
@@ -33,6 +35,8 @@ export function createMediaMaterials(item: ImportItem): MediaMaterial[] {
     if (asset.files.firstFrame) {
       addMaterial({
         id: `${item.id}:${asset.id}:first-frame`,
+        sourceAssetId: `${item.id}:${asset.id}`,
+        selectionGroupId: `${item.id}:${asset.id}`,
         importItem: item,
         mediaType: "image",
         label: "First frame",
@@ -45,6 +49,8 @@ export function createMediaMaterials(item: ImportItem): MediaMaterial[] {
     } else if (asset.files.image) {
       addMaterial({
         id: `${item.id}:${asset.id}:image`,
+        sourceAssetId: `${item.id}:${asset.id}`,
+        selectionGroupId: `${item.id}:${asset.id}`,
         importItem: item,
         mediaType: "image",
         label: "Image",
@@ -58,6 +64,8 @@ export function createMediaMaterials(item: ImportItem): MediaMaterial[] {
     if (asset.files.video) {
       addMaterial({
         id: `${item.id}:${asset.id}:video`,
+        sourceAssetId: `${item.id}:${asset.id}`,
+        selectionGroupId: `${item.id}:${asset.id}`,
         importItem: item,
         mediaType: "video",
         label: "Reel",
