@@ -1,7 +1,20 @@
 import type { GenerationJob, GenerationJobStatus } from "./generationJobs";
+import type { PromptMediaInput } from "./promptTypes";
 
 export type GenerationQueueFilter = "active" | "failed" | "completed" | "all";
 export type GenerationStatusTone = "waiting" | "running" | "success" | "error" | "muted";
+export type GenerationJobRecipe = {
+  visualInputs: Array<{
+    id: string;
+    label: string;
+    previewPath?: string;
+  }>;
+  promptInputs: Array<{
+    kind: "image" | "video";
+    label: string;
+  }>;
+  resultLabel: "Изображение" | "Видео";
+};
 
 const statusPresentation: Record<GenerationJobStatus, { label: string; tone: GenerationStatusTone }> = {
   queued: { label: "В очереди", tone: "waiting" },
@@ -60,4 +73,54 @@ export function getGenerationJobMoveAvailability(
     canMoveUp: queuedIndex > 0,
     canMoveDown: queuedIndex >= 0 && queuedIndex < queuedJobs.length - 1
   };
+}
+
+export function createGenerationJobRecipe(job: GenerationJob): GenerationJobRecipe {
+  const jobInput = job.input.job;
+  const visualInputs = deduplicateVisualInputs([
+    jobInput.media,
+    jobInput.sourceImage,
+    jobInput.generatedImage
+  ]);
+  const promptInputs: GenerationJobRecipe["promptInputs"] = [];
+
+  if (jobInput.imagePrompt) {
+    promptInputs.push({ kind: "image", label: jobInput.imagePrompt.mediaLabel });
+  }
+  if (jobInput.videoPrompt) {
+    promptInputs.push({ kind: "video", label: jobInput.videoPrompt.mediaLabel });
+  }
+
+  if (promptInputs.length === 0 && jobInput.prompt?.trim()) {
+    const studioIds = new Set(job.input.workflow.bindings.map((binding) => binding.studioId));
+    if (studioIds.has("2")) {
+      promptInputs.push({ kind: "image", label: jobInput.media.label });
+    }
+    if (studioIds.has("5")) {
+      promptInputs.push({ kind: "video", label: jobInput.media.label });
+    }
+  }
+
+  return {
+    visualInputs,
+    promptInputs,
+    resultLabel: job.kind === "image" ? "Изображение" : "Видео"
+  };
+}
+
+function deduplicateVisualInputs(
+  mediaInputs: Array<PromptMediaInput | undefined>
+): GenerationJobRecipe["visualInputs"] {
+  const seen = new Set<string>();
+  return mediaInputs.flatMap((media) => {
+    if (!media || seen.has(media.id)) {
+      return [];
+    }
+    seen.add(media.id);
+    return [{
+      id: media.id,
+      label: media.label,
+      previewPath: media.imagePath
+    }];
+  });
 }

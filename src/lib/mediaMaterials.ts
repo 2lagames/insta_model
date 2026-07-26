@@ -97,9 +97,11 @@ export function createSessionMediaMaterials(
     : orderedItems.flatMap(createMediaMaterials);
 
   let imageNumber = 0;
+  let videoNumber = 0;
   return materials.map((material) => {
-    if (material.mediaType !== "image") {
-      return material;
+    if (material.mediaType === "video") {
+      videoNumber += 1;
+      return { ...material, label: `REEL ${videoNumber}` };
     }
 
     imageNumber += 1;

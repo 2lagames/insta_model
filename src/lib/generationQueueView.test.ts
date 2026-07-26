@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GenerationJob, GenerationJobStatus } from "./generationJobs";
 import {
+  createGenerationJobRecipe,
   filterGenerationJobs,
   getGenerationJobMoveAvailability,
   getGenerationStatusPresentation,
@@ -96,6 +97,49 @@ describe("generation queue presentation", () => {
     expect(getGenerationJobMoveAvailability(jobs, secondQueued.id)).toEqual({
       canMoveUp: true,
       canMoveDown: false
+    });
+  });
+
+  it("describes video generation from frozen visual and prompt inputs", () => {
+    const videoJob = job("running");
+    videoJob.kind = "video";
+    videoJob.input.job = {
+      media: {
+        id: "reel-1",
+        label: "REEL 1",
+        imagePath: "/input/reel-1-frame.jpg",
+        videoPath: "/input/reel-1.mp4",
+        sourceKind: "video"
+      },
+      generatedImage: {
+        id: "image-2",
+        label: "IMAGE 2",
+        imagePath: "/output/image-2.jpg",
+        generatedImagePath: "/output/image-2.jpg",
+        sourceKind: "generated"
+      },
+      imagePrompt: {
+        mediaId: "image-2",
+        mediaLabel: "IMAGE 2",
+        text: "Preserve the appearance"
+      },
+      videoPrompt: {
+        mediaId: "reel-1",
+        mediaLabel: "REEL 1",
+        text: "Animate the movement"
+      }
+    };
+
+    expect(createGenerationJobRecipe(videoJob)).toEqual({
+      visualInputs: [
+        { id: "reel-1", label: "REEL 1", previewPath: "/input/reel-1-frame.jpg" },
+        { id: "image-2", label: "IMAGE 2", previewPath: "/output/image-2.jpg" }
+      ],
+      promptInputs: [
+        { kind: "image", label: "IMAGE 2" },
+        { kind: "video", label: "REEL 1" }
+      ],
+      resultLabel: "Видео"
     });
   });
 });

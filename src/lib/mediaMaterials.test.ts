@@ -45,7 +45,7 @@ describe("createMediaMaterials", () => {
 });
 
 describe("createSessionMediaMaterials", () => {
-  it("numbers every image in session order while preserving video labels", () => {
+  it("numbers images and Reels independently in session order", () => {
     const imageItem: ImportItem = {
       id: "post-1",
       sourceUrl: "https://www.instagram.com/p/example/",
@@ -65,14 +65,19 @@ describe("createSessionMediaMaterials", () => {
       status: "ready",
       createdAt: "2026-06-26T10:01:00.000Z",
       files: {},
-      assets: [{ id: "video-1", mediaType: "video", files: { video: "/input/video.mp4", firstFrame: "/input/frame.jpg" } }]
+      assets: [
+        { id: "video-1", mediaType: "video", files: { video: "/input/video-1.mp4", firstFrame: "/input/frame-1.jpg" } },
+        { id: "video-2", mediaType: "video", files: { video: "/input/video-2.mp4", firstFrame: "/input/frame-2.jpg" } }
+      ]
     };
 
     expect(createSessionMediaMaterials([imageItem, videoItem], ["post-1", "post-2"], imageItem, false).map((material) => material.label)).toEqual([
       "IMAGE 1",
       "IMAGE 2",
       "IMAGE 3",
-      "Reel"
+      "REEL 1",
+      "IMAGE 4",
+      "REEL 2"
     ]);
   });
 });
