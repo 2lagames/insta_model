@@ -68,6 +68,20 @@ describe("studio preview layout", () => {
     expect(queueEffect.indexOf("setItems((current) =>")).toBeLessThan(queueEffect.indexOf("const loadedSession = await listImports()"));
   });
 
+  it("renders the frozen media and prompt recipe for every queue job", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const cssSource = readFileSync("src/App.css", "utf8");
+    const queueStart = appSource.indexOf("function GenerationQueuePage");
+    const queuePage = appSource.slice(queueStart, appSource.indexOf("function Preview", queueStart));
+
+    expect(queuePage).toContain("createGenerationJobRecipe(job)");
+    expect(queuePage).toContain('className="queue-recipe"');
+    expect(queuePage).toContain("<strong>Промт:</strong>");
+    expect(queuePage).toContain("recipe.visualInputs.map");
+    expect(cssSource).toContain(".queue-recipe-visual");
+    expect(cssSource).toContain(".queue-recipe-prompt");
+  });
+
   it("aligns source and generated media columns at the top without stretching the studio panels", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const cssSource = readFileSync("src/App.css", "utf8");

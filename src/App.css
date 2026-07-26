@@ -635,7 +635,7 @@ input {
 
 .queue-row {
   display: grid;
-  grid-template-columns: 62px minmax(190px, 1.2fr) minmax(160px, 0.8fr) minmax(120px, 1fr) auto;
+  grid-template-columns: 62px minmax(360px, 1.7fr) minmax(160px, 0.7fr) minmax(100px, 0.6fr) auto;
   align-items: center;
   gap: 14px;
   min-height: 86px;
@@ -692,7 +692,6 @@ input {
   font-weight: 700;
 }
 
-.queue-media-label,
 .queue-meta,
 .queue-task-id {
   overflow: hidden;
@@ -702,14 +701,79 @@ input {
   white-space: nowrap;
 }
 
-.queue-media-label {
-  margin-top: 4px;
-  color: #2f2b26;
-  font-size: 13px;
+.queue-meta {
+  margin-top: 7px;
 }
 
-.queue-meta {
-  margin-top: 3px;
+.queue-recipe {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.queue-recipe-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.queue-recipe-separator {
+  color: #8b8175;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.queue-recipe-visual,
+.queue-recipe-prompt,
+.queue-recipe-result {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d6d0c4;
+  border-radius: 7px;
+  background: #fffdf8;
+  color: #2f2b26;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.queue-recipe-visual {
+  overflow: hidden;
+  padding-right: 8px;
+}
+
+.queue-recipe-visual img,
+.queue-recipe-placeholder {
+  width: 30px;
+  height: 30px;
+  margin-right: 7px;
+  object-fit: cover;
+  background: #e8e0d5;
+}
+
+.queue-recipe-placeholder {
+  display: grid;
+  place-items: center;
+  color: #6c6257;
+}
+
+.queue-recipe-prompt {
+  gap: 3px;
+  border-color: #c9d9e2;
+  padding: 0 8px;
+  background: #eef5f8;
+  color: #315d74;
+}
+
+.queue-recipe-result {
+  border-color: #c9c4ba;
+  padding: 0 9px;
+  background: #1d1c1a;
+  color: #ffffff;
 }
 
 .queue-progress {

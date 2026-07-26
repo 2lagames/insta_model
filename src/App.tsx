@@ -25,6 +25,7 @@ import {
 } from "./lib/api";
 import type { GenerationJob, GenerationJobMoveDirection } from "./lib/generationJobs";
 import {
+  createGenerationJobRecipe,
   filterGenerationJobs,
   getGenerationJobMoveAvailability,
   getGenerationStatusPresentation,
@@ -1267,13 +1268,30 @@ function GenerationQueuePage({
         const canRetry = job.status === "failed" || job.status === "recovery_required";
         const moveAvailability = getGenerationJobMoveAvailability(jobs, job.id);
         const status = getGenerationStatusPresentation(job.status);
+        const recipe = createGenerationJobRecipe(job);
         return <article className={`queue-row queue-${job.status}`} key={job.id}>
           <div className="queue-preview">
             {previewPath ? <img alt="" src={previewPath} /> : <span>{job.kind === "image" ? "I" : "V"}</span>}
           </div>
           <div className="queue-job-info">
             <div className="queue-job-title"><strong>{job.kind === "image" ? "Изображение" : "Видео"}</strong><span>{job.input.workflow.displayId}</span></div>
-            <div className="queue-media-label">{job.input.job.media.label}</div>
+            <div aria-label="Состав генерации" className="queue-recipe">
+              {recipe.visualInputs.map((input, index) => <span className="queue-recipe-part" key={`visual-${input.id}`}>
+                {index > 0 ? <span aria-hidden="true" className="queue-recipe-separator">+</span> : null}
+                <span className="queue-recipe-visual">
+                  {input.previewPath ? <img alt="" src={input.previewPath} /> : <span aria-hidden="true" className="queue-recipe-placeholder">M</span>}
+                  <span>{input.label}</span>
+                </span>
+              </span>)}
+              {recipe.promptInputs.map((input) => <span className="queue-recipe-part" key={`prompt-${input.kind}-${input.label}`}>
+                <span aria-hidden="true" className="queue-recipe-separator">+</span>
+                <span className="queue-recipe-prompt" title={input.kind === "image" ? "Промт изображения" : "Промт видео"}><strong>Промт:</strong> <span>{input.label}</span></span>
+              </span>)}
+              <span className="queue-recipe-part">
+                <span aria-hidden="true" className="queue-recipe-separator">→</span>
+                <span className="queue-recipe-result">{recipe.resultLabel}</span>
+              </span>
+            </div>
             <div className="queue-meta">Попытка {job.attempt} · {new Date(job.createdAt).toLocaleString()}</div>
           </div>
           <div className="queue-progress">

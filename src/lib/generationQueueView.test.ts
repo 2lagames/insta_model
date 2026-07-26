@@ -109,14 +109,14 @@ describe("generation queue presentation", () => {
         label: "REEL 1",
         imagePath: "/input/reel-1-frame.jpg",
         videoPath: "/input/reel-1.mp4",
-        sourceKind: "video"
+        sourceKind: "video-first-frame"
       },
       generatedImage: {
         id: "image-2",
         label: "IMAGE 2",
         imagePath: "/output/image-2.jpg",
         generatedImagePath: "/output/image-2.jpg",
-        sourceKind: "generated"
+        sourceKind: "photo"
       },
       imagePrompt: {
         mediaId: "image-2",
@@ -141,5 +141,17 @@ describe("generation queue presentation", () => {
       ],
       resultLabel: "Видео"
     });
+  });
+
+  it("shows the same media only once when it fills multiple workflow inputs", () => {
+    const imageJob = job("queued");
+    imageJob.input.job.generatedImage = {
+      ...imageJob.input.job.media,
+      generatedImagePath: imageJob.input.job.media.imagePath
+    };
+
+    expect(createGenerationJobRecipe(imageJob).visualInputs).toEqual([
+      { id: "media", label: "IMAGE 1", previewPath: "/input/image.jpg" }
+    ]);
   });
 });

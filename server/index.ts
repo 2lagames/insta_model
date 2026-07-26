@@ -13,6 +13,7 @@ import { resolveImportMetadataPath } from "./localMetadata";
 import { generateOllamaPrompt, listOllamaModels } from "./ollamaClient";
 import { getOllamaConfigurationForPreset } from "./ollamaConfiguration";
 import type { OllamaPreset, RunningHubInstanceType, RunningHubWorkflowPreset, StudioActionButton } from "../src/lib/generationPresets";
+import type { RunningHubTextPromptInput } from "../src/lib/runningHubJobs";
 import { GenerationCancelledError, GenerationController, type GenerationOperation } from "./generationController";
 import { GenerationEvents } from "./generationEvents";
 import { GenerationQueueStore } from "./generationQueueStore";
@@ -806,6 +807,8 @@ type ParsedRunningHubGenerationJob = {
   media: PromptMediaInput;
   sourceImage?: PromptMediaInput;
   generatedImage?: PromptMediaInput;
+  imagePrompt?: RunningHubTextPromptInput;
+  videoPrompt?: RunningHubTextPromptInput;
   prompt?: string;
 };
 
@@ -829,13 +832,37 @@ function parseRunningHubGenerationJobs(value: unknown): ParsedRunningHubGenerati
     const [sourceImage] = record.sourceImage === undefined
       ? []
       : parsePromptMedia([record.sourceImage]);
+    const imagePrompt = parseRunningHubTextPromptInput(record.imagePrompt, "imagePrompt");
+    const videoPrompt = parseRunningHubTextPromptInput(record.videoPrompt, "videoPrompt");
     return {
       media,
       ...(sourceImage ? { sourceImage } : {}),
       ...(generatedImage ? { generatedImage } : {}),
+      ...(imagePrompt ? { imagePrompt } : {}),
+      ...(videoPrompt ? { videoPrompt } : {}),
       ...(prompt ? { prompt } : {})
     };
   });
+}
+
+function parseRunningHubTextPromptInput(
+  value: unknown,
+  fieldName: "imagePrompt" | "videoPrompt"
+): RunningHubTextPromptInput | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${fieldName} must include mediaId, mediaLabel, and text.`);
+  }
+  const record = value as Record<string, unknown>;
+  const mediaId = typeof record.mediaId === "string" ? record.mediaId.trim() : "";
+  const mediaLabel = typeof record.mediaLabel === "string" ? record.mediaLabel.trim() : "";
+  const text = typeof record.text === "string" ? record.text.trim() : "";
+  if (!mediaId || !mediaLabel || !text) {
+    throw new Error(`${fieldName} must include mediaId, mediaLabel, and text.`);
+  }
+  return { mediaId, mediaLabel, text };
 }
 
 function resolveRunningHubGeneratedImagePath(job: ParsedRunningHubGenerationJob): string | undefined {
