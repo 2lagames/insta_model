@@ -7,6 +7,20 @@ import { assertUniqueRunningHubBindings, normalizeRunningHubBindings, type Runni
 type FetchLike = typeof fetch;
 type StatusCallback = (event: { tone: "running" | "ready" | "error"; message: string; source: "runninghub" }) => void;
 
+class RunningHubTransportError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RunningHubTransportError";
+  }
+}
+
+export class RunningHubPollUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RunningHubPollUnavailableError";
+  }
+}
+
 const defaultRunningHubBaseUrl = process.env.RUNNINGHUB_API_BASE_URL ?? "https://www.runninghub.ai";
 const defaultPollIntervalMs = Number(process.env.RUNNINGHUB_POLL_INTERVAL_MS ?? 5_000);
 const defaultMaxPolls = Number(process.env.RUNNINGHUB_MAX_POLLS ?? 360);
@@ -414,7 +428,22 @@ async function waitForTaskResult(options: {
 }): Promise<string[]> {
   for (let attempt = 1; attempt <= options.maxPolls; attempt += 1) {
     throwIfAborted(options.signal);
-    const response = await postRunningHubV2(options.fetchImpl, new URL("/openapi/v2/query", options.baseUrl), { taskId: options.taskId }, options.apiKey, `checking task ${options.taskId}`, options.signal);
+    let response: Response;
+    try {
+      response = await postRunningHubV2(options.fetchImpl, new URL("/openapi/v2/query", options.baseUrl), { taskId: options.taskId }, options.apiKey, `checking task ${options.taskId}`, options.signal);
+    } catch (error) {
+      if (!(error instanceof RunningHubTransportError)) throw error;
+      if (attempt === options.maxPolls) {
+        throw new RunningHubPollUnavailableError(error.message);
+      }
+      options.onStatus?.({
+        tone: "running",
+        source: "runninghub",
+        message: `RunningHub task ${options.taskId}: status check temporarily unavailable (${attempt}/${options.maxPolls}). Retrying.`
+      });
+      await sleep(options.pollIntervalMs, options.signal);
+      continue;
+    }
     const payload = await response.json() as unknown;
     assertRunningHubOk(payload, `check task ${options.taskId}`);
     const status = extractStatus(payload);
@@ -500,7 +529,7 @@ async function postRunningHubV2(fetchImpl: FetchLike, url: URL, body: unknown, a
   } catch (error) {
     throwIfAborted(signal);
     const message = error instanceof Error ? error.message : "unknown error";
-    throw new Error(`RunningHub request failed while ${action}: ${message}`);
+    throw new RunningHubTransportError(`RunningHub request failed while ${action}: ${message}`);
   }
 
   if (!response.ok) {

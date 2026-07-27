@@ -92,6 +92,28 @@ describe("GenerationQueueStore", () => {
     });
   });
 
+  it("recovers cancellation intent without releasing a known provider task", async () => {
+    const store = await createStore();
+    const [providerTask, localTask] = await store.createJobs("video", [input, input]);
+    for (const job of [providerTask, localTask]) {
+      await store.transition(job.id, "preparing");
+      await store.transition(job.id, "uploading");
+    }
+    await store.transition(providerTask.id, "submitting");
+    await store.transition(providerTask.id, "running", { providerTaskId: "provider-task" });
+    await store.requestCancel(providerTask.id);
+    await store.requestCancel(localTask.id);
+
+    await store.recover();
+
+    expect(await store.get(providerTask.id)).toMatchObject({
+      status: "queued",
+      providerTaskId: "provider-task",
+      cancelRequestedAt: expect.any(String)
+    });
+    expect((await store.get(localTask.id))?.status).toBe("canceled");
+  });
+
   it("requires confirmation before retrying an ambiguous submission", async () => {
     const store = await createStore();
     const [job] = await store.createJobs("video", [input]);

@@ -75,7 +75,7 @@ const allowedTransitions: Record<GenerationJobStatus, GenerationJobStatus[]> = {
   submitting: ["running", "queued", "canceling", "failed", "recovery_required"],
   running: ["downloading", "queued", "canceling", "failed", "recovery_required"],
   downloading: ["succeeded", "queued", "canceling", "failed", "recovery_required"],
-  canceling: ["canceled", "succeeded", "failed"],
+  canceling: ["queued", "canceled", "succeeded", "failed"],
   failed: ["queued"],
   recovery_required: ["queued"],
   succeeded: [],

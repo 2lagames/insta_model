@@ -101,6 +101,49 @@ describe("cancelRunningHubTask", () => {
 describe("runRunningHubImageGeneration", () => {
   const sourceImagePath = fileURLToPath(import.meta.url);
 
+  it("keeps polling an existing task after a transient network failure", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "runninghub-poll-retry-"));
+    let queryAttempts = 0;
+    const fetchImpl = (async (url: URL | RequestInfo) => {
+      const requestUrl = new URL(String(url));
+      if (requestUrl.pathname.endsWith("/openapi/v2/query")) {
+        queryAttempts += 1;
+        if (queryAttempts === 1) throw new TypeError("fetch failed");
+        return new Response(JSON.stringify({
+          taskId: "existing-task",
+          status: "SUCCESS",
+          results: [{ url: "https://cdn.example.com/result.png", outputType: "png" }]
+        }));
+      }
+      if (requestUrl.hostname === "cdn.example.com") {
+        return new Response("png", { headers: { "Content-Type": "image/png" } });
+      }
+      throw new Error(`Unexpected request: ${requestUrl.toString()}`);
+    }) as typeof fetch;
+
+    try {
+      const result = await runRunningHubImageGeneration({
+        outputDir: join(tempDir, "output"),
+        baseUrl: "https://runninghub.example.com",
+        fetchImpl,
+        pollIntervalMs: 1,
+        maxPolls: 3,
+        resumeTaskId: "existing-task",
+        config: {
+          apiKey: "key",
+          workflowId: "workflow",
+          bindings: [{ nodeId: "6", fieldName: "text", studioId: "2" }]
+        },
+        jobs: [{ mediaId: "media", label: "Image", prompt: "Prompt" }]
+      });
+
+      expect(queryAttempts).toBe(2);
+      expect(result.assets).toHaveLength(1);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("resumes a persisted task id without creating a second RunningHub task", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "runninghub-resume-"));
     let createRequests = 0;

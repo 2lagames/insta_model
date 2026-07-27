@@ -37,6 +37,23 @@ const generationQueue = new GenerationQueueStore(dataDir);
 const generationEvents = new GenerationEvents();
 const generationWorker = new GenerationWorker(generationQueue, executeQueuedGeneration, () => {
   void generationQueue.list().then((jobs) => generationEvents.publish(jobs));
+}, {
+  concurrency: generationConcurrency,
+  cancelProviderTask: async (job) => {
+    if (!job.providerTaskId) return;
+    const connections = await connectionsStore.readPrivate();
+    await cancelRunningHubTask({
+      apiKey: connections.runningHubApiKey ?? "",
+      taskId: job.providerTaskId
+    });
+  },
+  onCancelError: (_job, error) => {
+    activityLog.publish({
+      tone: "error",
+      source: "generation",
+      message: `RunningHub cancellation request failed: ${toErrorMessage(error)}`
+    });
+  }
 });
 
 const app = express();

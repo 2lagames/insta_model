@@ -193,6 +193,10 @@ export class GenerationQueueStore {
                 retryable: false
               }
             });
+        } else if (job.status === "canceling") {
+          next = job.providerTaskId
+            ? updateStatus(job, "queued")
+            : updateStatus(job, "canceled");
         }
         if (next !== job) recovered.push(next);
         return next;
