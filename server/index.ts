@@ -16,6 +16,7 @@ import { getOllamaConfigurationForPreset } from "./ollamaConfiguration";
 import type { OllamaPreset, RunningHubInstanceType, RunningHubWorkflowPreset, StudioActionButton } from "../src/lib/generationPresets";
 import type { RunningHubTextPromptInput } from "../src/lib/runningHubJobs";
 import { GenerationCancelledError, GenerationController, type GenerationOperation } from "./generationController";
+import { parseGenerationConcurrency } from "./generationConcurrency";
 import { GenerationEvents } from "./generationEvents";
 import { GenerationQueueStore } from "./generationQueueStore";
 import { GenerationWorker } from "./generationWorker";
@@ -23,6 +24,7 @@ import { cancelRunningHubTask, runRunningHubImageGeneration, runRunningHubVideoG
 
 const packageMetadata = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
 const port = Number(process.env.API_PORT ?? 4317);
+const generationConcurrency = parseGenerationConcurrency(process.env.GENERATION_CONCURRENCY);
 const projectRoot = process.cwd();
 const dataDir = join(projectRoot, "data");
 const inputDir = join(projectRoot, "input");
@@ -65,7 +67,8 @@ app.get("/api/health", (_request, response) => {
   response.json({
     ok: true,
     importProvider: "apify",
-    version: packageMetadata.version
+    version: packageMetadata.version,
+    generationConcurrency
   });
 });
 
