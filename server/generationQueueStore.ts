@@ -21,7 +21,8 @@ const activeStatuses = new Set<GenerationJobStatus>([
 const resumableProviderErrorCodes = new Set([
   "RUNNINGHUB_POLL_UNAVAILABLE",
   "RUNNINGHUB_POLL_TIMEOUT",
-  "RUNNINGHUB_DOWNLOAD_FAILED"
+  "RUNNINGHUB_DOWNLOAD_FAILED",
+  "GENERATION_RESULT_PERSIST_FAILED"
 ]);
 
 export class GenerationQueueStore {

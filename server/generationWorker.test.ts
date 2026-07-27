@@ -512,4 +512,28 @@ describe("GenerationWorker", () => {
     expect(failed.error?.code).toBe("RUNNINGHUB_DOWNLOAD_FAILED");
     expect(failed.providerTaskId).toBe("provider-task-1");
   });
+
+  it("marks local result persistence failure as safe to retry without a new provider task", async () => {
+    const root = await mkdtemp(join(tmpdir(), "generation-worker-"));
+    tempDirs.push(root);
+    const queue = new GenerationQueueStore(root);
+    await queue.createJobs("video", [input]);
+    const worker = new GenerationWorker(queue, async (_job, context) => {
+      await context.setPhase("uploading");
+      await context.setPhase("submitting");
+      await context.setTaskId("provider-task-1");
+      await context.setPhase("downloading");
+      throw new Error("local result persistence failed");
+    });
+
+    await worker.start();
+    await worker.whenIdle();
+
+    const [failed] = await queue.list();
+    expect(failed.error).toMatchObject({
+      phase: "persist",
+      code: "GENERATION_RESULT_PERSIST_FAILED"
+    });
+    expect((await queue.retry(failed.id)).providerTaskId).toBe("provider-task-1");
+  });
 });

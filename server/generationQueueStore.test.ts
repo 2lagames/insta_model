@@ -182,7 +182,8 @@ describe("GenerationQueueStore", () => {
 
   it.each([
     ["RUNNINGHUB_POLL_TIMEOUT", "poll"],
-    ["RUNNINGHUB_DOWNLOAD_FAILED", "download"]
+    ["RUNNINGHUB_DOWNLOAD_FAILED", "download"],
+    ["GENERATION_RESULT_PERSIST_FAILED", "persist"]
   ] as const)("resumes the same provider task after %s", async (code, phase) => {
     const store = await createStore();
     const [job] = await store.createJobs("video", [input]);
@@ -190,7 +191,7 @@ describe("GenerationQueueStore", () => {
     await store.transition(job.id, "uploading");
     await store.transition(job.id, "submitting");
     await store.transition(job.id, "running", { providerTaskId: "provider-task-resume" });
-    if (phase === "download") await store.transition(job.id, "downloading");
+    if (phase === "download" || phase === "persist") await store.transition(job.id, "downloading");
     await store.fail(job.id, {
       phase,
       code,

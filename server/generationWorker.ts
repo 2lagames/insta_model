@@ -227,9 +227,10 @@ export class GenerationWorker {
           await this.queue.transition(job.id, "canceled", { completedAt: new Date().toISOString() });
           return;
         }
+        const failure = generationFailure(error, current.status);
         await this.queue.fail(job.id, {
-          phase: phaseForStatus(current.status),
-          code: errorCode(error),
+          phase: failure.phase,
+          code: failure.code,
           message,
           retryable: true
         });
@@ -270,9 +271,18 @@ async function waitForRetry(delayMs: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
-function errorCode(error: unknown): string {
-  if (error instanceof RunningHubPollUnavailableError) return "RUNNINGHUB_POLL_UNAVAILABLE";
-  if (error instanceof RunningHubPollTimeoutError) return "RUNNINGHUB_POLL_TIMEOUT";
-  if (error instanceof RunningHubDownloadError) return "RUNNINGHUB_DOWNLOAD_FAILED";
-  return "GENERATION_FAILED";
+function generationFailure(error: unknown, status: GenerationJobStatus) {
+  if (error instanceof RunningHubPollUnavailableError) {
+    return { phase: "poll" as const, code: "RUNNINGHUB_POLL_UNAVAILABLE" };
+  }
+  if (error instanceof RunningHubPollTimeoutError) {
+    return { phase: "poll" as const, code: "RUNNINGHUB_POLL_TIMEOUT" };
+  }
+  if (error instanceof RunningHubDownloadError) {
+    return { phase: "download" as const, code: "RUNNINGHUB_DOWNLOAD_FAILED" };
+  }
+  if (status === "downloading") {
+    return { phase: "persist" as const, code: "GENERATION_RESULT_PERSIST_FAILED" };
+  }
+  return { phase: phaseForStatus(status), code: "GENERATION_FAILED" };
 }

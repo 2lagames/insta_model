@@ -199,6 +199,7 @@ The existing `Активные` filter continues to include both executing and q
 - A transient RunningHub polling failure continues using the existing polling retry behavior.
 - A resumable polling failure retains its provider task ID.
 - Retrying a provider-terminal failure creates a new task; retrying a resumable polling/download failure reuses the existing task ID.
+- A local result-persistence failure after download also reuses the terminal provider task instead of creating a replacement task.
 - Persistence failures do not allow a replacement job to exceed the store's active count.
 - Scheduler errors are reported without recursively spawning unbounded wake operations.
 
