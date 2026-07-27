@@ -82,6 +82,21 @@ describe("studio preview layout", () => {
     expect(cssSource).toContain(".queue-recipe-prompt");
   });
 
+  it("deduplicates enqueue responses and shows visible queued movement feedback", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const cssSource = readFileSync("src/App.css", "utf8");
+    const queueStart = appSource.indexOf("function GenerationQueuePage");
+    const queuePage = appSource.slice(queueStart, appSource.indexOf("function Preview", queueStart));
+
+    expect(appSource.match(/mergeEnqueuedGenerationJobs\(current, queued\)/g)).toHaveLength(2);
+    expect(queuePage).toContain("getGenerationJobQueuePosition(jobs, job.id)");
+    expect(queuePage).toContain("await onMove(jobId, direction)");
+    expect(queuePage).toContain("movingJobId === job.id");
+    expect(queuePage).toContain("recentlyMovedJobId === job.id");
+    expect(queuePage).toContain("№{queuePosition} в очереди");
+    expect(cssSource).toContain(".queue-row-recently-moved");
+  });
+
   it("aligns source and generated media columns at the top without stretching the studio panels", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const cssSource = readFileSync("src/App.css", "utf8");

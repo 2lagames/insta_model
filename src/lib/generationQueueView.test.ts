@@ -4,8 +4,10 @@ import {
   createGenerationJobRecipe,
   filterGenerationJobs,
   getGenerationJobMoveAvailability,
+  getGenerationJobQueuePosition,
   getGenerationStatusPresentation,
   getNewGenerationOutputIds,
+  mergeEnqueuedGenerationJobs,
   summarizeGenerationJobs
 } from "./generationQueueView";
 
@@ -98,6 +100,27 @@ describe("generation queue presentation", () => {
       canMoveUp: true,
       canMoveDown: false
     });
+  });
+
+  it("does not duplicate a job when its live snapshot arrives before the enqueue response", () => {
+    const queued = job("queued");
+    queued.id = "queued-1";
+
+    expect(mergeEnqueuedGenerationJobs([queued], [queued])).toEqual([queued]);
+  });
+
+  it("returns one-based positions only for queued jobs", () => {
+    const running = job("running");
+    const firstQueued = job("queued");
+    firstQueued.id = "queued-1";
+    const completed = job("succeeded");
+    const secondQueued = job("queued");
+    secondQueued.id = "queued-2";
+    const jobs = [running, firstQueued, completed, secondQueued];
+
+    expect(getGenerationJobQueuePosition(jobs, running.id)).toBeUndefined();
+    expect(getGenerationJobQueuePosition(jobs, firstQueued.id)).toBe(1);
+    expect(getGenerationJobQueuePosition(jobs, secondQueued.id)).toBe(2);
   });
 
   it("describes video generation from frozen visual and prompt inputs", () => {

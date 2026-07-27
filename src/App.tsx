@@ -28,8 +28,10 @@ import {
   createGenerationJobRecipe,
   filterGenerationJobs,
   getGenerationJobMoveAvailability,
+  getGenerationJobQueuePosition,
   getGenerationStatusPresentation,
   getNewGenerationOutputIds,
+  mergeEnqueuedGenerationJobs,
   summarizeGenerationJobs,
   type GenerationQueueFilter
 } from "./lib/generationQueueView";
@@ -806,7 +808,7 @@ export default function App() {
       recordStatus({ tone: "running", message: "Sending the inputs configured for the selected RunningHub workflow." });
       const imageJobs = repeatImageGenerationJobs(workflowJobs, imageGenerationsPerMedia);
       const queued = await enqueueImageJobs(imageJobs, runningHubWorkflowPresetId);
-      setGenerationJobs((current) => [...current, ...queued]);
+      setGenerationJobs((current) => mergeEnqueuedGenerationJobs(current, queued));
       recordStatus({ tone: "ready", message: `Добавлено в очередь: ${queued.length}` });
     } catch (error) {
       if (!isAbortError(error)) {
@@ -850,7 +852,7 @@ export default function App() {
         promptsByMediaId
       });
       const queued = await enqueueVideoJobs(jobs, runningHubWorkflowPresetId);
-      setGenerationJobs((current) => [...current, ...queued]);
+      setGenerationJobs((current) => mergeEnqueuedGenerationJobs(current, queued));
       recordStatus({ tone: "ready", message: `Добавлено в очередь: ${queued.length}` });
     } catch (error) {
       if (!isAbortError(error)) {
@@ -1172,7 +1174,14 @@ export default function App() {
         <GenerationQueuePage
           jobs={generationJobs}
           onCancel={(jobId) => void cancelGenerationJob(jobId).catch((error: unknown) => recordStatus({ tone: "error", message: toErrorMessage(error) }))}
-          onMove={(jobId, direction) => void moveGenerationJob(jobId, direction).then(setGenerationJobs).catch((error: unknown) => recordStatus({ tone: "error", message: toErrorMessage(error) }))}
+          onMove={async (jobId, direction) => {
+            try {
+              setGenerationJobs(await moveGenerationJob(jobId, direction));
+            } catch (error) {
+              recordStatus({ tone: "error", message: toErrorMessage(error) });
+              throw error;
+            }
+          }}
           onRetry={(jobId, ambiguous) => void retryGenerationJob(jobId, ambiguous).then(() => listGenerationJobs()).then(setGenerationJobs).catch((error: unknown) => recordStatus({ tone: "error", message: toErrorMessage(error) }))}
         />
       ) : (
@@ -1232,10 +1241,13 @@ function GenerationQueuePage({
 }: {
   jobs: GenerationJob[];
   onCancel: (jobId: string) => void;
-  onMove: (jobId: string, direction: GenerationJobMoveDirection) => void;
+  onMove: (jobId: string, direction: GenerationJobMoveDirection) => Promise<void>;
   onRetry: (jobId: string, ambiguous: boolean) => void;
 }) {
   const [filter, setFilter] = useState<GenerationQueueFilter>("active");
+  const [movingJobId, setMovingJobId] = useState<string | null>(null);
+  const [recentlyMovedJobId, setRecentlyMovedJobId] = useState<string | null>(null);
+  const movedFeedbackTimeoutRef = useRef<number | undefined>(undefined);
   const visibleJobs = filterGenerationJobs(jobs, filter);
   const summary = summarizeGenerationJobs(jobs);
   const filterOptions: Array<{ id: GenerationQueueFilter; label: string; count: number }> = [
@@ -1244,6 +1256,31 @@ function GenerationQueuePage({
     { id: "completed", label: "Готовые", count: summary.completed },
     { id: "all", label: "Все", count: jobs.length }
   ];
+
+  useEffect(() => () => {
+    if (movedFeedbackTimeoutRef.current !== undefined) {
+      window.clearTimeout(movedFeedbackTimeoutRef.current);
+    }
+  }, []);
+
+  async function handleQueueMove(jobId: string, direction: GenerationJobMoveDirection) {
+    setMovingJobId(jobId);
+    try {
+      await onMove(jobId, direction);
+      if (movedFeedbackTimeoutRef.current !== undefined) {
+        window.clearTimeout(movedFeedbackTimeoutRef.current);
+      }
+      setRecentlyMovedJobId(jobId);
+      movedFeedbackTimeoutRef.current = window.setTimeout(() => {
+        setRecentlyMovedJobId(null);
+        movedFeedbackTimeoutRef.current = undefined;
+      }, 900);
+    } catch {
+      // The parent reports move errors through the application status log.
+    } finally {
+      setMovingJobId(null);
+    }
+  }
 
   return <section className="queue-page">
     <div className="queue-header">
@@ -1267,9 +1304,12 @@ function GenerationQueuePage({
         const canCancel = ["queued", "preparing", "uploading", "submitting", "running", "downloading"].includes(job.status);
         const canRetry = job.status === "failed" || job.status === "recovery_required";
         const moveAvailability = getGenerationJobMoveAvailability(jobs, job.id);
+        const queuePosition = getGenerationJobQueuePosition(jobs, job.id);
+        const isMoving = movingJobId === job.id;
+        const wasRecentlyMoved = recentlyMovedJobId === job.id;
         const status = getGenerationStatusPresentation(job.status);
         const recipe = createGenerationJobRecipe(job);
-        return <article className={`queue-row queue-${job.status}`} key={job.id}>
+        return <article className={`queue-row queue-${job.status}${wasRecentlyMoved ? " queue-row-recently-moved" : ""}`} key={job.id}>
           <div className="queue-preview">
             {previewPath ? <img alt="" src={previewPath} /> : <span>{job.kind === "image" ? "I" : "V"}</span>}
           </div>
@@ -1292,7 +1332,7 @@ function GenerationQueuePage({
                 <span className="queue-recipe-result">{recipe.resultLabel}</span>
               </span>
             </div>
-            <div className="queue-meta">Попытка {job.attempt} · {new Date(job.createdAt).toLocaleString()}</div>
+            <div className="queue-meta">{queuePosition ? <>№{queuePosition} в очереди · </> : null}Попытка {job.attempt} · {new Date(job.createdAt).toLocaleString()}</div>
           </div>
           <div className="queue-progress">
             <span className={`queue-status queue-tone-${status.tone}`}>{status.label}</span>
@@ -1302,8 +1342,8 @@ function GenerationQueuePage({
           <div className="queue-error">{job.error?.message ?? ""}</div>
           <div className="queue-actions">
             {job.status === "queued" ? <div className="queue-order-actions">
-              <button aria-label={`Переместить ${job.input.job.media.label} вверх`} className="queue-order-button" disabled={!moveAvailability.canMoveUp} onClick={() => onMove(job.id, "up")} title="Переместить вверх" type="button">↑</button>
-              <button aria-label={`Переместить ${job.input.job.media.label} вниз`} className="queue-order-button" disabled={!moveAvailability.canMoveDown} onClick={() => onMove(job.id, "down")} title="Переместить вниз" type="button">↓</button>
+              <button aria-label={`Переместить ${job.input.job.media.label} вверх`} className={`queue-order-button${isMoving ? " queue-order-button-moving" : ""}`} disabled={isMoving || !moveAvailability.canMoveUp} onClick={() => void handleQueueMove(job.id, "up")} title="Переместить вверх" type="button">↑</button>
+              <button aria-label={`Переместить ${job.input.job.media.label} вниз`} className={`queue-order-button${isMoving ? " queue-order-button-moving" : ""}`} disabled={isMoving || !moveAvailability.canMoveDown} onClick={() => void handleQueueMove(job.id, "down")} title="Переместить вниз" type="button">↓</button>
             </div> : null}
             {canCancel ? <button className="queue-action-secondary" onClick={() => onCancel(job.id)} type="button">Отменить</button> : null}
             {canRetry ? <button className="queue-action-primary" onClick={() => onRetry(job.id, job.status === "recovery_required")} type="button">Повторить</button> : null}

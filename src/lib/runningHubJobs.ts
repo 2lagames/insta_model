@@ -155,7 +155,7 @@ export function createRunningHubGenerationJobs(input: {
       ? (requiresSourceMedia ? generatedImages[0] : media)
       : undefined;
     const imagePromptSource = requiresImagePrompt
-      ? generatedImage ?? sourceImage ?? (!media.videoPath ? media : undefined)
+      ? generatedImage ?? sourceImage ?? media
       : undefined;
     const videoPromptSource = requiresVideoPrompt && media.videoPath ? media : undefined;
 

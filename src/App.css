@@ -655,6 +655,23 @@ input {
   box-shadow: inset 3px 0 0 #1f5f87;
 }
 
+.queue-row-recently-moved {
+  animation: queue-row-moved 900ms ease-out;
+}
+
+@keyframes queue-row-moved {
+  from {
+    border-color: #1f5f87;
+    box-shadow: 0 0 0 3px rgba(31, 95, 135, 0.18);
+    transform: translateY(-2px);
+  }
+  to {
+    border-color: #ded8ce;
+    box-shadow: none;
+    transform: translateY(0);
+  }
+}
+
 .queue-preview {
   width: 62px;
   height: 62px;
@@ -879,6 +896,12 @@ input {
 .queue-actions .queue-order-button:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+.queue-actions .queue-order-button-moving {
+  border-color: #1f5f87;
+  background: #dfeef6;
+  color: #1f5f87;
 }
 
 .queue-action-secondary {

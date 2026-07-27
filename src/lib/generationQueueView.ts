@@ -75,6 +75,25 @@ export function getGenerationJobMoveAvailability(
   };
 }
 
+export function mergeEnqueuedGenerationJobs(
+  current: GenerationJob[],
+  enqueued: GenerationJob[]
+): GenerationJob[] {
+  const existingIds = new Set(current.map((job) => job.id));
+  return [
+    ...current,
+    ...enqueued.filter((job) => !existingIds.has(job.id))
+  ];
+}
+
+export function getGenerationJobQueuePosition(
+  jobs: GenerationJob[],
+  jobId: string
+): number | undefined {
+  const index = jobs.filter((job) => job.status === "queued").findIndex((job) => job.id === jobId);
+  return index >= 0 ? index + 1 : undefined;
+}
+
 export function createGenerationJobRecipe(job: GenerationJob): GenerationJobRecipe {
   const jobInput = job.input.job;
   const visualInputs = deduplicateVisualInputs([

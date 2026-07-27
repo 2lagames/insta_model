@@ -199,6 +199,46 @@ describe("createRunningHubGenerationJobs", () => {
     }]);
   });
 
+  it("generates and stores an image prompt for a Reel first frame used by Studio ID 1", async () => {
+    const editorPrompts = new Map([
+      ["source-video", { value: "Portrait lighting", managedPrefix: "Portrait lighting" }],
+    ]);
+    const generatedFor: string[] = [];
+
+    const jobs = await prepareRunningHubGenerationJobs({
+      bindings: [
+        { nodeId: "39", fieldName: "image", studioId: "1" },
+        { nodeId: "6", fieldName: "text", studioId: "2" },
+      ],
+      selectedMedia: [sourceVideo],
+      promptEntriesByMediaId: editorPrompts,
+      studioActionButtons: [
+        { id: "text-action", label: "Text", type: "text", presetId: "ol-1", order: 0 },
+      ],
+      ollamaPresets: [
+        { id: "ol-1", displayId: "OL01", provider: "local", model: "gemma3", promptInstruction: "Describe the image." },
+      ],
+      hasOllamaCloudApiKey: false,
+      generateAndStorePrompt: async (media) => {
+        generatedFor.push(media.id);
+        const value = "Portrait lighting\nGenerated Reel description";
+        editorPrompts.set(media.id, { value, managedPrefix: "Portrait lighting" });
+        return value;
+      },
+    });
+
+    expect(generatedFor).toEqual(["source-video"]);
+    expect(editorPrompts.get("source-video")?.value).toBe("Portrait lighting\nGenerated Reel description");
+    expect(jobs).toEqual([{
+      media: sourceVideo,
+      imagePrompt: {
+        mediaId: sourceVideo.id,
+        mediaLabel: sourceVideo.label,
+        text: "Portrait lighting\nGenerated Reel description"
+      }
+    }]);
+  });
+
   it("keeps an existing edited prompt without generating another one", async () => {
     const jobs = await prepareRunningHubGenerationJobs({
       bindings: [
