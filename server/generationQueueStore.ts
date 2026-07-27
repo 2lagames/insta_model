@@ -18,6 +18,11 @@ import { JsonStateStore } from "./jsonStateStore";
 const activeStatuses = new Set<GenerationJobStatus>([
   "preparing", "uploading", "submitting", "running", "downloading", "canceling"
 ]);
+const resumableProviderErrorCodes = new Set([
+  "RUNNINGHUB_POLL_UNAVAILABLE",
+  "RUNNINGHUB_POLL_TIMEOUT",
+  "RUNNINGHUB_DOWNLOAD_FAILED"
+]);
 
 export class GenerationQueueStore {
   private readonly state: JsonStateStore<GenerationJobSnapshot>;
@@ -99,15 +104,49 @@ export class GenerationQueueStore {
     return await this.transition(id, "succeeded", { output, completedAt: new Date().toISOString() });
   }
 
+  async recordProviderTaskId(id: string, providerTaskId: string): Promise<GenerationJob> {
+    let result: GenerationJob | undefined;
+    await this.state.mutate((snapshot) => ({
+      ...snapshot,
+      jobs: snapshot.jobs.map((job) => {
+        if (job.id !== id) return job;
+        if (job.status === "submitting") {
+          result = updateStatus(job, "running", { providerTaskId });
+          return result;
+        }
+        if (job.status === "running" || job.status === "canceling") {
+          result = {
+            ...job,
+            providerTaskId,
+            updatedAt: new Date().toISOString()
+          };
+          return result;
+        }
+        throw new Error(`Generation job ${id} cannot record a provider task from ${job.status}.`);
+      })
+    }));
+    if (!result) throw new Error(`Generation job ${id} was not found.`);
+    return result;
+  }
+
   async requestCancel(id: string): Promise<GenerationJob> {
-    const job = await this.getRequired(id);
-    if (job.status === "queued") {
-      return await this.transition(id, "canceled", { completedAt: new Date().toISOString() });
-    }
-    if (activeStatuses.has(job.status) && job.status !== "canceling") {
-      return await this.transition(id, "canceling", { cancelRequestedAt: new Date().toISOString() });
-    }
-    return job;
+    let result: GenerationJob | undefined;
+    await this.state.mutate((snapshot) => ({
+      ...snapshot,
+      jobs: snapshot.jobs.map((job) => {
+        if (job.id !== id) return job;
+        if (job.status === "queued") {
+          result = updateStatus(job, "canceled", { completedAt: new Date().toISOString() });
+        } else if (activeStatuses.has(job.status) && job.status !== "canceling") {
+          result = updateStatus(job, "canceling", { cancelRequestedAt: new Date().toISOString() });
+        } else {
+          result = job;
+        }
+        return result;
+      })
+    }));
+    if (!result) throw new Error(`Generation job ${id} was not found.`);
+    return result;
   }
 
   async moveQueued(id: string, direction: GenerationJobMoveDirection): Promise<GenerationJob[]> {
@@ -146,16 +185,21 @@ export class GenerationQueueStore {
     if (job.status !== "failed" && job.status !== "recovery_required") {
       throw new Error(`Generation job ${id} cannot be retried from ${job.status}.`);
     }
+    const legacyPollingFailure = job.error?.phase === "poll"
+      && job.error.message.startsWith(`RunningHub request failed while checking task ${job.providerTaskId}:`);
+    const prioritizeProviderResume = Boolean(job.providerTaskId)
+      && (job.error?.code === "RUNNINGHUB_POLL_UNAVAILABLE"
+        || job.error?.code === "RUNNINGHUB_POLL_TIMEOUT"
+        || legacyPollingFailure);
     let result: GenerationJob | undefined;
-    await this.state.mutate((snapshot) => ({
-      ...snapshot,
-      jobs: snapshot.jobs.map((item) => {
+    await this.state.mutate((snapshot) => {
+      const jobs = snapshot.jobs.map((item) => {
         if (item.id !== id) return item;
         assertGenerationJobTransition(item.status, "queued");
         const pollingRequestFailed = item.error?.phase === "poll"
           && item.error.message.startsWith(`RunningHub request failed while checking task ${item.providerTaskId}:`);
         const resumeProviderTask = Boolean(item.providerTaskId)
-          && (item.error?.code === "RUNNINGHUB_POLL_UNAVAILABLE" || pollingRequestFailed);
+          && (resumableProviderErrorCodes.has(item.error?.code ?? "") || pollingRequestFailed);
         result = {
           ...item,
           status: "queued",
@@ -169,16 +213,20 @@ export class GenerationQueueStore {
           updatedAt: new Date().toISOString()
         };
         return result;
-      })
-    }));
+      });
+      return {
+        ...snapshot,
+        jobs: prioritizeProviderResume ? moveQueuedJobFirst(jobs, id) : jobs
+      };
+    });
     return result!;
   }
 
   async recover(): Promise<GenerationJob[]> {
     const recovered: GenerationJob[] = [];
-    await this.state.mutate((snapshot) => ({
-      ...snapshot,
-      jobs: snapshot.jobs.map((job) => {
+    await this.state.mutate((snapshot) => {
+      const providerResumeIds = new Set<string>();
+      const jobs = snapshot.jobs.map((job) => {
         let next = job;
         if (job.status === "preparing" || job.status === "uploading") {
           next = updateStatus(job, "queued");
@@ -198,10 +246,26 @@ export class GenerationQueueStore {
             ? updateStatus(job, "queued")
             : updateStatus(job, "canceled");
         }
-        if (next !== job) recovered.push(next);
+        if (next !== job) {
+          recovered.push(next);
+          if (next.status === "queued" && next.providerTaskId) {
+            providerResumeIds.add(next.id);
+          }
+        }
         return next;
-      })
-    }));
+      });
+      const queuedIndexes = jobs.flatMap((job, index) => job.status === "queued" ? [index] : []);
+      const queuedJobs = queuedIndexes.map((index) => jobs[index]);
+      const orderedQueuedJobs = [
+        ...queuedJobs.filter((job) => providerResumeIds.has(job.id)),
+        ...queuedJobs.filter((job) => !providerResumeIds.has(job.id))
+      ];
+      const reorderedJobs = [...jobs];
+      queuedIndexes.forEach((index, queuedIndex) => {
+        reorderedJobs[index] = orderedQueuedJobs[queuedIndex];
+      });
+      return { ...snapshot, jobs: reorderedJobs };
+    });
     return recovered;
   }
 
@@ -227,4 +291,21 @@ function updateStatus(
       ? { completedAt: new Date().toISOString() }
       : {})
   };
+}
+
+function moveQueuedJobFirst(jobs: GenerationJob[], id: string): GenerationJob[] {
+  const queuedIndexes = jobs.flatMap((job, index) => job.status === "queued" ? [index] : []);
+  const queuedJobs = queuedIndexes.map((index) => jobs[index]);
+  const targetIndex = queuedJobs.findIndex((job) => job.id === id);
+  if (targetIndex <= 0) return jobs;
+  const orderedQueuedJobs = [
+    queuedJobs[targetIndex],
+    ...queuedJobs.slice(0, targetIndex),
+    ...queuedJobs.slice(targetIndex + 1)
+  ];
+  const reorderedJobs = [...jobs];
+  queuedIndexes.forEach((index, queuedIndex) => {
+    reorderedJobs[index] = orderedQueuedJobs[queuedIndex];
+  });
+  return reorderedJobs;
 }

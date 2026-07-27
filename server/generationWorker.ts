@@ -2,7 +2,12 @@ import type { GenerationJob, GenerationJobStatus } from "../src/lib/generationJo
 import type { ImportItem } from "../src/lib/importTypes";
 import type { GenerationConcurrency } from "./generationConcurrency";
 import { GenerationQueueStore } from "./generationQueueStore";
-import { RunningHubPollUnavailableError } from "./runningHub";
+import {
+  RunningHubDownloadError,
+  RunningHubPollUnavailableError,
+  RunningHubPollTimeoutError,
+  RunningHubTerminalTaskError
+} from "./runningHub";
 
 type WorkerPhase = Extract<GenerationJobStatus, "uploading" | "submitting" | "downloading">;
 
@@ -21,6 +26,9 @@ export type GenerationWorkerOptions = {
   concurrency?: GenerationConcurrency;
   cancelProviderTask?: (job: GenerationJob) => Promise<void>;
   onCancelError?: (job: GenerationJob, error: unknown) => void;
+  onWorkerError?: (error: unknown, job?: GenerationJob) => void;
+  resumableRetryDelayMs?: number;
+  schedulerRetryDelayMs?: number;
 };
 
 type ActiveExecution = {
@@ -33,6 +41,7 @@ export class GenerationWorker {
   private readonly concurrency: GenerationConcurrency;
   private schedulePromise: Promise<void> | undefined;
   private scheduleRequested = false;
+  private schedulerFailureCount = 0;
 
   constructor(
     private readonly queue: GenerationQueueStore,
@@ -51,10 +60,22 @@ export class GenerationWorker {
   wake(): void {
     this.scheduleRequested = true;
     if (!this.schedulePromise) {
-      this.schedulePromise = this.schedule().finally(() => {
-        this.schedulePromise = undefined;
-        if (this.scheduleRequested) this.wake();
-      });
+      this.schedulePromise = this.schedule()
+        .then(() => {
+          this.schedulerFailureCount = 0;
+        })
+        .catch(async (error) => {
+          this.reportWorkerError(error);
+          this.schedulerFailureCount += 1;
+          const baseDelay = this.options.schedulerRetryDelayMs ?? 1_000;
+          const delay = Math.min(baseDelay * (2 ** (this.schedulerFailureCount - 1)), 30_000);
+          await waitForRetry(delay);
+          this.scheduleRequested = true;
+        })
+        .finally(() => {
+          this.schedulePromise = undefined;
+          if (this.scheduleRequested) this.wake();
+        });
     }
   }
 
@@ -98,60 +119,121 @@ export class GenerationWorker {
   }
 
   private launch(job: GenerationJob): void {
-    const abortController = new AbortController();
     const execution: ActiveExecution = {
-      abortController,
+      abortController: new AbortController(),
       promise: Promise.resolve()
     };
     this.active.set(job.id, execution);
-    execution.promise = this.executeOne(job, abortController).finally(() => {
-      this.active.delete(job.id);
-      this.onChange();
-      this.wake();
-    });
+    execution.promise = this.executeOne(job, execution)
+      .catch((error) => this.reportWorkerError(error, job))
+      .finally(() => {
+        this.active.delete(job.id);
+        this.onChange();
+        this.wake();
+      });
   }
 
-  private async executeOne(job: GenerationJob, abortController: AbortController): Promise<void> {
+  private async executeOne(job: GenerationJob, execution: ActiveExecution): Promise<void> {
     let executingJob = job;
-    try {
-      if (job.providerTaskId) {
-        executingJob = await this.queue.transition(
-          job.id,
-          job.cancelRequestedAt ? "canceling" : "running"
-        );
-        if (job.cancelRequestedAt) {
-          await this.requestProviderCancellation(executingJob);
-        }
-        this.onChange();
-      }
-      const output = await this.execute(executingJob, {
-        signal: abortController.signal,
-        setPhase: async (phase) => {
-          const current = await this.queue.get(job.id);
-          if (current?.status === "canceling") return;
-          await this.queue.transition(job.id, phase);
-          this.onChange();
-        },
-        setTaskId: async (taskId) => {
-          await this.queue.transition(job.id, "running", { providerTaskId: taskId });
+    let cancellationRequestedTaskId: string | undefined;
+    while (true) {
+      try {
+        if (executingJob.status === "preparing" && executingJob.providerTaskId) {
+          executingJob = await this.queue.transition(
+            job.id,
+            executingJob.cancelRequestedAt ? "canceling" : "running"
+          );
+          if (executingJob.cancelRequestedAt) {
+            await this.requestProviderCancellation(executingJob);
+            cancellationRequestedTaskId = executingJob.providerTaskId;
+          }
           this.onChange();
         }
-      });
-      await this.queue.succeed(job.id, output);
-    } catch (error) {
-      const current = await this.queue.get(job.id);
-      const message = error instanceof Error ? error.message : "Generation failed.";
-      if (current?.status === "canceling" || abortController.signal.aborted) {
-        await this.queue.transition(job.id, "canceled", { completedAt: new Date().toISOString() });
-      } else {
+        const output = await this.execute(executingJob, {
+          signal: execution.abortController.signal,
+          setPhase: async (phase) => {
+            const current = await this.queue.get(job.id);
+            if (current?.status === "canceling") {
+              executingJob = current;
+              return;
+            }
+            executingJob = await this.queue.transition(job.id, phase);
+            this.onChange();
+          },
+          setTaskId: async (taskId) => {
+            while (true) {
+              try {
+                const current = await this.queue.get(job.id);
+                if (current?.status === "canceling" && cancellationRequestedTaskId !== taskId) {
+                  await this.requestProviderCancellation({ ...current, providerTaskId: taskId });
+                  cancellationRequestedTaskId = taskId;
+                }
+                executingJob = await this.queue.recordProviderTaskId(job.id, taskId);
+                if (executingJob.status === "canceling" && cancellationRequestedTaskId !== taskId) {
+                  await this.requestProviderCancellation(executingJob);
+                  cancellationRequestedTaskId = taskId;
+                }
+                this.onChange();
+                return;
+              } catch (error) {
+                const current = await this.queue.get(job.id).catch(() => undefined);
+                const pendingJob = current
+                  ? { ...current, providerTaskId: taskId }
+                  : { ...executingJob, providerTaskId: taskId };
+                this.reportWorkerError(error, pendingJob);
+                await waitForRetry(this.options.resumableRetryDelayMs ?? 5_000);
+              }
+            }
+          }
+        });
+        await this.queue.succeed(job.id, output);
+        return;
+      } catch (error) {
+        const current = await this.queue.get(job.id);
+        if (!current) throw error;
+        const message = error instanceof Error ? error.message : "Generation failed.";
+        if (error instanceof RunningHubTerminalTaskError) {
+          if (current.status === "canceling") {
+            await this.queue.transition(job.id, "canceled", { completedAt: new Date().toISOString() });
+          } else {
+            await this.queue.fail(job.id, {
+              phase: "poll",
+              code: "RUNNINGHUB_PROVIDER_FAILED",
+              message,
+              retryable: false
+            });
+          }
+          return;
+        }
+        if (current.status === "canceling") {
+          if (!current.providerTaskId) {
+            await this.queue.transition(job.id, "canceled", { completedAt: new Date().toISOString() });
+            return;
+          }
+          executingJob = current;
+          if (execution.abortController.signal.aborted) {
+            execution.abortController = new AbortController();
+          }
+          await waitForRetry(this.options.resumableRetryDelayMs ?? 5_000);
+          continue;
+        }
+        if (current.status === "running" && current.providerTaskId) {
+          this.reportWorkerError(error, current);
+          executingJob = current;
+          await waitForRetry(this.options.resumableRetryDelayMs ?? 5_000);
+          continue;
+        }
+        if (execution.abortController.signal.aborted) {
+          await this.queue.transition(job.id, "canceled", { completedAt: new Date().toISOString() });
+          return;
+        }
         await this.queue.fail(job.id, {
-          phase: phaseForStatus(current?.status),
-          code: error instanceof RunningHubPollUnavailableError
-            ? "RUNNINGHUB_POLL_UNAVAILABLE"
-            : "GENERATION_FAILED",
+          phase: phaseForStatus(current.status),
+          code: errorCode(error),
           message,
           retryable: true
         });
+        return;
       }
     }
   }
@@ -164,6 +246,14 @@ export class GenerationWorker {
       this.options.onCancelError?.(job, error);
     }
   }
+
+  private reportWorkerError(error: unknown, job?: GenerationJob): void {
+    try {
+      this.options.onWorkerError?.(error, job);
+    } catch {
+      // Error reporting must not create another unobserved worker rejection.
+    }
+  }
 }
 
 function phaseForStatus(status: GenerationJobStatus | undefined) {
@@ -173,4 +263,16 @@ function phaseForStatus(status: GenerationJobStatus | undefined) {
   if (status === "downloading") return "download" as const;
   if (status === "canceling") return "cancel" as const;
   return "prepare" as const;
+}
+
+async function waitForRetry(delayMs: number): Promise<void> {
+  if (delayMs <= 0) return;
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function errorCode(error: unknown): string {
+  if (error instanceof RunningHubPollUnavailableError) return "RUNNINGHUB_POLL_UNAVAILABLE";
+  if (error instanceof RunningHubPollTimeoutError) return "RUNNINGHUB_POLL_TIMEOUT";
+  if (error instanceof RunningHubDownloadError) return "RUNNINGHUB_DOWNLOAD_FAILED";
+  return "GENERATION_FAILED";
 }

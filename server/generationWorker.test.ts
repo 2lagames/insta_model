@@ -1,11 +1,16 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ImportItem } from "../src/lib/importTypes";
 import { GenerationQueueStore } from "./generationQueueStore";
 import { GenerationWorker } from "./generationWorker";
-import { RunningHubPollUnavailableError } from "./runningHub";
+import {
+  RunningHubDownloadError,
+  RunningHubPollUnavailableError,
+  RunningHubPollTimeoutError,
+  RunningHubTerminalTaskError
+} from "./runningHub";
 
 const tempDirs: string[] = [];
 afterEach(async () => Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
@@ -196,12 +201,107 @@ describe("GenerationWorker", () => {
     expect(signals.get(jobs[1].id)?.aborted).toBe(false);
     expect((await queue.get(jobs[0].id))?.status).toBe("canceling");
 
-    completions.get(jobs[0].id)!.reject(new Error("provider canceled"));
+    completions.get(jobs[0].id)!.reject(new RunningHubTerminalTaskError("provider canceled", "CANCELED"));
     completions.get(jobs[1].id)!.resolve();
     await worker.whenIdle();
 
     expect((await queue.get(jobs[0].id))?.status).toBe("canceled");
     expect((await queue.get(jobs[1].id))?.status).toBe("succeeded");
+  });
+
+  it("persists a task created during cancellation and cancels it at the provider", async () => {
+    const root = await mkdtemp(join(tmpdir(), "generation-worker-"));
+    tempDirs.push(root);
+    const queue = new GenerationQueueStore(root);
+    const [job] = await queue.createJobs("video", [input]);
+    const submitting = deferred<void>();
+    const allowTaskCreation = deferred<void>();
+    const canceledTaskIds: string[] = [];
+    let attempts = 0;
+    const worker = new GenerationWorker(queue, async (_job, context) => {
+      attempts += 1;
+      if (attempts > 1) {
+        throw new RunningHubTerminalTaskError("provider canceled", "CANCELED");
+      }
+      await context.setPhase("uploading");
+      await context.setPhase("submitting");
+      submitting.resolve();
+      await allowTaskCreation.promise;
+      await context.setTaskId("provider-task-race");
+      context.signal.throwIfAborted();
+      return output(job.id);
+    }, () => undefined, {
+      concurrency: 1,
+      resumableRetryDelayMs: 0,
+      cancelProviderTask: async (current) => {
+        canceledTaskIds.push(current.providerTaskId!);
+      }
+    });
+
+    await worker.start();
+    await submitting.promise;
+    await worker.cancel(job.id);
+    allowTaskCreation.resolve();
+    await worker.whenIdle();
+
+    expect(canceledTaskIds).toEqual(["provider-task-race"]);
+    expect(await queue.get(job.id)).toMatchObject({
+      status: "canceled",
+      providerTaskId: "provider-task-race"
+    });
+  });
+
+  it("holds the slot while cancellation status is temporarily unavailable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "generation-worker-"));
+    tempDirs.push(root);
+    const queue = new GenerationQueueStore(root);
+    const jobs = await queue.createJobs("video", [input, input]);
+    const firstSubmitted = deferred<void>();
+    const failFirstPoll = deferred<void>();
+    const resumedPoll = deferred<void>();
+    const confirmTerminal = deferred<void>();
+    const starts: string[] = [];
+    let firstAttempts = 0;
+    const worker = new GenerationWorker(queue, async (job, context) => {
+      starts.push(job.id);
+      if (job.id !== jobs[0].id) {
+        await context.setPhase("uploading");
+        await context.setPhase("submitting");
+        await context.setTaskId("provider-task-2");
+        await context.setPhase("downloading");
+        return output(job.id);
+      }
+      firstAttempts += 1;
+      if (firstAttempts === 1) {
+        await context.setPhase("uploading");
+        await context.setPhase("submitting");
+        await context.setTaskId("provider-task-1");
+        firstSubmitted.resolve();
+        await failFirstPoll.promise;
+        throw new RunningHubPollUnavailableError("poll unavailable");
+      }
+      resumedPoll.resolve();
+      await confirmTerminal.promise;
+      throw new RunningHubTerminalTaskError("provider canceled", "CANCELED");
+    }, () => undefined, {
+      concurrency: 1,
+      resumableRetryDelayMs: 0,
+      cancelProviderTask: async () => undefined
+    });
+
+    await worker.start();
+    await firstSubmitted.promise;
+    await worker.cancel(jobs[0].id);
+    failFirstPoll.resolve();
+    await resumedPoll.promise;
+
+    expect(starts).toEqual([jobs[0].id, jobs[0].id]);
+    expect((await queue.get(jobs[0].id))?.status).toBe("canceling");
+    expect((await queue.get(jobs[1].id))?.status).toBe("queued");
+
+    confirmTerminal.resolve();
+    await worker.whenIdle();
+    expect((await queue.list()).map((job) => job.status)).toEqual(["canceled", "succeeded"]);
   });
 
   it("continues with the next job after an independent failure", async () => {
@@ -226,7 +326,174 @@ describe("GenerationWorker", () => {
     expect((await queue.list()).map((job) => job.status)).toEqual(["failed", "succeeded"]);
   });
 
-  it("marks an exhausted RunningHub polling outage as safe to resume", async () => {
+  it("reports scheduler failures instead of leaving a rejected promise unobserved", async () => {
+    const root = await mkdtemp(join(tmpdir(), "generation-worker-"));
+    tempDirs.push(root);
+    const queue = new GenerationQueueStore(root);
+    const [job] = await queue.createJobs("image", [input]);
+    vi.spyOn(queue, "claimNext").mockRejectedValueOnce(new Error("claim failed"));
+    const errors: string[] = [];
+    const worker = new GenerationWorker(queue, async (current, context) => {
+      await context.setPhase("uploading");
+      await context.setPhase("submitting");
+      await context.setTaskId("provider-task");
+      await context.setPhase("downloading");
+      return output(current.id);
+    }, () => undefined, {
+      schedulerRetryDelayMs: 0,
+      onWorkerError: (error) => {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    });
+
+    await worker.start();
+    await waitFor(() => errors.length === 1);
+    await waitFor(() => errors.length === 1 && errors[0] === "claim failed");
+    await worker.whenIdle();
+    expect(errors).toEqual(["claim failed"]);
+    expect((await queue.get(job.id))?.status).toBe("succeeded");
+  });
+
+  it("reports persistence failures raised while completing an execution", async () => {
+    const root = await mkdtemp(join(tmpdir(), "generation-worker-"));
+    tempDirs.push(root);
+    const queue = new GenerationQueueStore(root);
+    const [job] = await queue.createJobs("image", [input]);
+    vi.spyOn(queue, "fail").mockRejectedValueOnce(new Error("persist failed"));
+    const errors: Array<{ jobId?: string; message: string }> = [];
+    const worker = new GenerationWorker(queue, async () => {
+      throw new Error("provider failed");
+    }, () => undefined, {
+      onWorkerError: (error, currentJob) => {
+        errors.push({
+          jobId: currentJob?.id,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    });
+
+    await worker.start();
+    await worker.whenIdle();
+
+    expect(errors).toEqual([{ jobId: job.id, message: "persist failed" }]);
+  });
+
+  it("holds the slot while a new provider task id is temporarily not persisted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "generation-worker-"));
+    tempDirs.push(root);
+    const queue = new GenerationQueueStore(root);
+    const jobs = await queue.createJobs("video", [input, input]);
+    const originalRecordTaskId = queue.recordProviderTaskId.bind(queue);
+    const allowPersistence = deferred<void>();
+    const persistenceFailed = deferred<void>();
+    let recordAttempts = 0;
+    vi.spyOn(queue, "recordProviderTaskId").mockImplementation(async (jobId, taskId) => {
+      recordAttempts += 1;
+      if (recordAttempts === 1) throw new Error("task id persistence failed");
+      await allowPersistence.promise;
+      return await originalRecordTaskId(jobId, taskId);
+    });
+    const starts: string[] = [];
+    const canceledTaskIds: string[] = [];
+    let firstJobExecutions = 0;
+    const worker = new GenerationWorker(queue, async (job, context) => {
+      starts.push(job.id);
+      if (job.id === jobs[0].id) {
+        firstJobExecutions += 1;
+        if (firstJobExecutions > 1) {
+          throw new RunningHubTerminalTaskError("provider canceled", "CANCELED");
+        }
+      }
+      await context.setPhase("uploading");
+      await context.setPhase("submitting");
+      await context.setTaskId(`provider-${job.id}`);
+      context.signal.throwIfAborted();
+      await context.setPhase("downloading");
+      return output(job.id);
+    }, () => undefined, {
+      concurrency: 1,
+      resumableRetryDelayMs: 10,
+      cancelProviderTask: async (job) => {
+        canceledTaskIds.push(job.providerTaskId!);
+      },
+      onWorkerError: (error) => {
+        if (error instanceof Error && error.message === "task id persistence failed") {
+          persistenceFailed.resolve();
+        }
+      }
+    });
+
+    await worker.start();
+    await persistenceFailed.promise;
+    await worker.cancel(jobs[0].id);
+    await waitFor(() => canceledTaskIds.length === 1);
+
+    expect(canceledTaskIds).toEqual([`provider-${jobs[0].id}`]);
+    expect(starts).toEqual([jobs[0].id]);
+    expect((await queue.get(jobs[1].id))?.status).toBe("queued");
+
+    allowPersistence.resolve();
+    await worker.whenIdle();
+    expect((await queue.get(jobs[0].id))?.providerTaskId).toBe(`provider-${jobs[0].id}`);
+    expect((await queue.get(jobs[0].id))?.status).toBe("canceled");
+    expect((await queue.get(jobs[1].id))?.status).toBe("succeeded");
+  });
+
+  it.each([
+    [
+      new RunningHubPollUnavailableError("RunningHub request failed while checking task provider-task-1: fetch failed"),
+      "RUNNINGHUB_POLL_UNAVAILABLE"
+    ],
+    [
+      new RunningHubPollTimeoutError("RunningHub task provider-task-1 timed out"),
+      "RUNNINGHUB_POLL_TIMEOUT"
+    ]
+  ])("keeps the slot and resumes automatically after %s", async (executionError) => {
+    const root = await mkdtemp(join(tmpdir(), "generation-worker-"));
+    tempDirs.push(root);
+    const queue = new GenerationQueueStore(root);
+    const jobs = await queue.createJobs("video", [input, input]);
+    const resumed = deferred<void>();
+    const finishResumedPoll = deferred<void>();
+    const starts: string[] = [];
+    let attempts = 0;
+    const worker = new GenerationWorker(queue, async (job, context) => {
+      starts.push(job.id);
+      if (job.id === jobs[0].id) {
+        attempts += 1;
+        if (attempts === 1) {
+          await context.setPhase("uploading");
+          await context.setPhase("submitting");
+          await context.setTaskId("provider-task-1");
+          throw executionError;
+        }
+        resumed.resolve();
+        await finishResumedPoll.promise;
+      } else {
+        await context.setPhase("uploading");
+        await context.setPhase("submitting");
+        await context.setTaskId("provider-task-2");
+      }
+      await context.setPhase("downloading");
+      return output(job.id);
+    }, () => undefined, {
+      concurrency: 1,
+      resumableRetryDelayMs: 0
+    });
+
+    await worker.start();
+    await resumed.promise;
+
+    expect(starts).toEqual([jobs[0].id, jobs[0].id]);
+    expect((await queue.get(jobs[0].id))?.status).toBe("running");
+    expect((await queue.get(jobs[1].id))?.status).toBe("queued");
+
+    finishResumedPoll.resolve();
+    await worker.whenIdle();
+    expect((await queue.list()).map((job) => job.status)).toEqual(["succeeded", "succeeded"]);
+  });
+
+  it("marks a download failure as safe to retry with the same provider task", async () => {
     const root = await mkdtemp(join(tmpdir(), "generation-worker-"));
     tempDirs.push(root);
     const queue = new GenerationQueueStore(root);
@@ -235,14 +502,14 @@ describe("GenerationWorker", () => {
       await context.setPhase("uploading");
       await context.setPhase("submitting");
       await context.setTaskId("provider-task-1");
-      throw new RunningHubPollUnavailableError("RunningHub request failed while checking task provider-task-1: fetch failed");
+      await context.setPhase("downloading");
+      throw new RunningHubDownloadError("Could not download provider task output");
     });
 
     await worker.start();
     await worker.whenIdle();
-
     const [failed] = await queue.list();
-    expect(failed.error?.code).toBe("RUNNINGHUB_POLL_UNAVAILABLE");
+    expect(failed.error?.code).toBe("RUNNINGHUB_DOWNLOAD_FAILED");
     expect(failed.providerTaskId).toBe("provider-task-1");
   });
 });

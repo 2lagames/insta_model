@@ -1,7 +1,7 @@
 # Parallel Generation Queue Design
 
-**Date:** 2026-07-28  
-**Status:** Approved design pending written-spec review  
+**Date:** 2026-07-28
+**Status:** Implemented
 **Scope:** Run up to two RunningHub generation jobs concurrently
 
 ## 1. Goal
@@ -32,6 +32,8 @@ The default limit is `2`. The server may set `GENERATION_CONCURRENCY=1` for diag
 ### 2.2. FIFO scheduling
 
 When both slots are free, the first two queued jobs start. When one job reaches a terminal state, the first remaining queued job starts immediately.
+
+The safety exception applies to provider tasks whose terminal state is still unknown. During startup recovery, jobs that were active and already have provider task IDs are moved ahead of ordinary queued jobs, while preserving relative order within both groups. A manual poll retry receives the same safety priority; a download retry retains normal FIFO position because the provider has already reported success. This prevents recovery from admitting a third external task without letting a later download retry jump the queue.
 
 Reordering applies only to jobs whose status is `queued`. Moving a queued job never preempts or changes an active job.
 

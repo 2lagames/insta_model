@@ -53,6 +53,13 @@ const generationWorker = new GenerationWorker(generationQueue, executeQueuedGene
       source: "generation",
       message: `RunningHub cancellation request failed: ${toErrorMessage(error)}`
     });
+  },
+  onWorkerError: (error, job) => {
+    activityLog.publish({
+      tone: "error",
+      source: "generation",
+      message: `Generation worker failed${job ? ` for job ${job.id}` : ""}: ${toErrorMessage(error)}`
+    });
   }
 });
 

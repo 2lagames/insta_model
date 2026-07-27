@@ -92,6 +92,23 @@ describe("GenerationQueueStore", () => {
     });
   });
 
+  it("claims recovered provider tasks before an earlier ordinary queued job", async () => {
+    const store = await createStore();
+    const [ordinary, firstProvider, secondProvider] = await store.createJobs("video", [input, input, input]);
+    for (const job of [firstProvider, secondProvider]) {
+      await store.transition(job.id, "preparing");
+      await store.transition(job.id, "uploading");
+      await store.transition(job.id, "submitting");
+      await store.transition(job.id, "running", { providerTaskId: `task-${job.id}` });
+    }
+
+    await store.recover();
+    const claimed = await Promise.all([store.claimNext(2), store.claimNext(2)]);
+
+    expect(claimed.map((job) => job?.id)).toEqual([firstProvider.id, secondProvider.id]);
+    expect((await store.get(ordinary.id))?.status).toBe("queued");
+  });
+
   it("recovers cancellation intent without releasing a known provider task", async () => {
     const store = await createStore();
     const [providerTask, localTask] = await store.createJobs("video", [input, input]);
@@ -112,6 +129,23 @@ describe("GenerationQueueStore", () => {
       cancelRequestedAt: expect.any(String)
     });
     expect((await store.get(localTask.id))?.status).toBe("canceled");
+  });
+
+  it("records a provider task id without losing concurrent cancellation intent", async () => {
+    const store = await createStore();
+    const [job] = await store.createJobs("video", [input]);
+    await store.transition(job.id, "preparing");
+    await store.transition(job.id, "uploading");
+    await store.transition(job.id, "submitting");
+    await store.requestCancel(job.id);
+
+    const recorded = await store.recordProviderTaskId(job.id, "provider-task-race");
+
+    expect(recorded).toMatchObject({
+      status: "canceling",
+      providerTaskId: "provider-task-race",
+      cancelRequestedAt: expect.any(String)
+    });
   });
 
   it("requires confirmation before retrying an ambiguous submission", async () => {
@@ -144,6 +178,82 @@ describe("GenerationQueueStore", () => {
 
     expect(retried.status).toBe("queued");
     expect(retried.providerTaskId).toBe("provider-task-1");
+  });
+
+  it.each([
+    ["RUNNINGHUB_POLL_TIMEOUT", "poll"],
+    ["RUNNINGHUB_DOWNLOAD_FAILED", "download"]
+  ] as const)("resumes the same provider task after %s", async (code, phase) => {
+    const store = await createStore();
+    const [job] = await store.createJobs("video", [input]);
+    await store.transition(job.id, "preparing");
+    await store.transition(job.id, "uploading");
+    await store.transition(job.id, "submitting");
+    await store.transition(job.id, "running", { providerTaskId: "provider-task-resume" });
+    if (phase === "download") await store.transition(job.id, "downloading");
+    await store.fail(job.id, {
+      phase,
+      code,
+      message: "temporary failure after provider task creation",
+      retryable: true
+    });
+
+    expect((await store.retry(job.id)).providerTaskId).toBe("provider-task-resume");
+  });
+
+  it("keeps a manual resumable retry in FIFO order", async () => {
+    const store = await createStore();
+    const [ordinary, retryJob] = await store.createJobs("video", [input, input]);
+    await store.transition(retryJob.id, "preparing");
+    await store.transition(retryJob.id, "uploading");
+    await store.transition(retryJob.id, "submitting");
+    await store.transition(retryJob.id, "running", { providerTaskId: "provider-task-retry" });
+    await store.transition(retryJob.id, "downloading");
+    await store.fail(retryJob.id, {
+      phase: "download",
+      code: "RUNNINGHUB_DOWNLOAD_FAILED",
+      message: "temporary download failure",
+      retryable: true
+    });
+    await store.retry(retryJob.id);
+
+    expect((await store.claimNext(1))?.id).toBe(ordinary.id);
+  });
+
+  it("prioritizes a manual retry whose provider status is still unknown", async () => {
+    const store = await createStore();
+    const [ordinary, retryJob] = await store.createJobs("video", [input, input]);
+    await store.transition(retryJob.id, "preparing");
+    await store.transition(retryJob.id, "uploading");
+    await store.transition(retryJob.id, "submitting");
+    await store.transition(retryJob.id, "running", { providerTaskId: "provider-task-poll" });
+    await store.fail(retryJob.id, {
+      phase: "poll",
+      code: "RUNNINGHUB_POLL_TIMEOUT",
+      message: "provider status is unknown",
+      retryable: true
+    });
+    await store.retry(retryJob.id);
+
+    expect((await store.claimNext(1))?.id).toBe(retryJob.id);
+    expect((await store.get(ordinary.id))?.status).toBe("queued");
+  });
+
+  it("clears a terminal provider task before retrying", async () => {
+    const store = await createStore();
+    const [job] = await store.createJobs("video", [input]);
+    await store.transition(job.id, "preparing");
+    await store.transition(job.id, "uploading");
+    await store.transition(job.id, "submitting");
+    await store.transition(job.id, "running", { providerTaskId: "terminal-provider-task" });
+    await store.fail(job.id, {
+      phase: "poll",
+      code: "RUNNINGHUB_PROVIDER_FAILED",
+      message: "provider failed",
+      retryable: false
+    });
+
+    expect((await store.retry(job.id)).providerTaskId).toBeUndefined();
   });
 
   it("cancels a queued job without claiming it", async () => {

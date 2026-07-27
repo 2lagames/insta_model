@@ -1292,7 +1292,7 @@ function GenerationQueuePage({
       <div>
         <div className="panel-label">Queue</div>
         <h1>Очередь генерации</h1>
-        <p>Очередь запускает до двух генераций одновременно — изображения и видео используют общие слоты. Ожидающие задания можно менять местами.</p>
+        <p>Очередь запускает до {generationConcurrency} {generationConcurrency === 1 ? "генерации" : "генераций"} одновременно — изображения и видео используют общие слоты. Ожидающие задания можно менять местами.</p>
         <div className="queue-capacity">Активно {summary.executing} из {generationConcurrency} · Ожидают {summary.queued}</div>
       </div>
       <div aria-label="Фильтр очереди" className="queue-filters">

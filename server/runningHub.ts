@@ -8,7 +8,7 @@ type FetchLike = typeof fetch;
 type StatusCallback = (event: { tone: "running" | "ready" | "error"; message: string; source: "runninghub" }) => void;
 
 class RunningHubTransportError extends Error {
-  constructor(message: string) {
+  constructor(message: string, readonly retryAfterMs?: number) {
     super(message);
     this.name = "RunningHubTransportError";
   }
@@ -18,6 +18,27 @@ export class RunningHubPollUnavailableError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "RunningHubPollUnavailableError";
+  }
+}
+
+export class RunningHubPollTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RunningHubPollTimeoutError";
+  }
+}
+
+export class RunningHubDownloadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RunningHubDownloadError";
+  }
+}
+
+export class RunningHubTerminalTaskError extends Error {
+  constructor(message: string, readonly status: string) {
+    super(message);
+    this.name = "RunningHubTerminalTaskError";
   }
 }
 
@@ -441,7 +462,7 @@ async function waitForTaskResult(options: {
         source: "runninghub",
         message: `RunningHub task ${options.taskId}: status check temporarily unavailable (${attempt}/${options.maxPolls}). Retrying.`
       });
-      await sleep(options.pollIntervalMs, options.signal);
+      await sleep(error.retryAfterMs ?? options.pollIntervalMs, options.signal);
       continue;
     }
     const payload = await response.json() as unknown;
@@ -466,12 +487,17 @@ async function waitForTaskResult(options: {
       });
     }
     if (isFailureStatus(status)) {
-      throw new Error(`RunningHub task ${options.taskId} failed with status: ${status}${getRunningHubErrorMessage(payload)}`);
+      throw new RunningHubTerminalTaskError(
+        `RunningHub task ${options.taskId} failed with status: ${status}${getRunningHubErrorMessage(payload)}`,
+        status!
+      );
     }
     await sleep(options.pollIntervalMs, options.signal);
   }
 
-  throw new Error(`RunningHub task ${options.taskId} did not return a result after ${options.maxPolls} status checks.`);
+  throw new RunningHubPollTimeoutError(
+    `RunningHub task ${options.taskId} did not return a result after ${options.maxPolls} status checks.`
+  );
 }
 
 async function postRunningHub(fetchImpl: FetchLike, url: URL, body: unknown, action: string, signal?: AbortSignal): Promise<Response> {
@@ -533,7 +559,11 @@ async function postRunningHubV2(fetchImpl: FetchLike, url: URL, body: unknown, a
   }
 
   if (!response.ok) {
-    throw new Error(`RunningHub request failed while ${action} with ${response.status}: ${await response.text()}`);
+    const message = `RunningHub request failed while ${action} with ${response.status}: ${await response.text()}`;
+    if (response.status === 408 || response.status === 429 || response.status >= 500) {
+      throw new RunningHubTransportError(message, parseRetryAfterMs(response.headers.get("Retry-After")));
+    }
+    throw new Error(message);
   }
   return response;
 }
@@ -660,31 +690,40 @@ async function downloadOutputAsset(options: {
   signal?: AbortSignal;
 }): Promise<ImportAsset> {
   throwIfAborted(options.signal);
-  const response = options.signal
-    ? await options.fetchImpl(options.url, { signal: options.signal })
-    : await options.fetchImpl(options.url);
-  if (!response.ok) {
-    throw new Error(`Could not download RunningHub output ${options.url}: ${response.status} ${await response.text()}`);
-  }
-
-  const extension = getOutputExtension(options.url, response.headers.get("Content-Type"), options.outputKind);
-  const fileName = `${sanitizeFilePart(options.taskId)}-${options.outputKind}-${options.outputIndex + 1}${extension}`;
-  const absolutePath = join(options.outputDateDir, fileName);
-  const bytes = Buffer.from(await response.arrayBuffer());
-  await writeFile(absolutePath, bytes);
-
-  const publicPath = `/output/${options.dateFolder}/${fileName}`;
-  return options.outputKind === "video"
-    ? {
-      id: `${sanitizeFilePart(options.sourceMediaId)}-video-${options.outputIndex + 1}-${sanitizeFilePart(options.taskId)}`,
-      mediaType: "video",
-      files: { video: publicPath }
+  try {
+    const response = options.signal
+      ? await options.fetchImpl(options.url, { signal: options.signal })
+      : await options.fetchImpl(options.url);
+    if (!response.ok) {
+      throw new RunningHubDownloadError(
+        `Could not download RunningHub output ${options.url}: ${response.status} ${await response.text()}`
+      );
     }
-    : {
-      id: `${sanitizeFilePart(options.sourceMediaId)}-output-${options.outputIndex + 1}-${sanitizeFilePart(options.taskId)}`,
-      mediaType: "image",
-      files: { image: publicPath, thumbnail: publicPath }
-    };
+
+    const extension = getOutputExtension(options.url, response.headers.get("Content-Type"), options.outputKind);
+    const fileName = `${sanitizeFilePart(options.taskId)}-${options.outputKind}-${options.outputIndex + 1}${extension}`;
+    const absolutePath = join(options.outputDateDir, fileName);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    await writeFile(absolutePath, bytes);
+
+    const publicPath = `/output/${options.dateFolder}/${fileName}`;
+    return options.outputKind === "video"
+      ? {
+        id: `${sanitizeFilePart(options.sourceMediaId)}-video-${options.outputIndex + 1}-${sanitizeFilePart(options.taskId)}`,
+        mediaType: "video",
+        files: { video: publicPath }
+      }
+      : {
+        id: `${sanitizeFilePart(options.sourceMediaId)}-output-${options.outputIndex + 1}-${sanitizeFilePart(options.taskId)}`,
+        mediaType: "image",
+        files: { image: publicPath, thumbnail: publicPath }
+      };
+  } catch (error) {
+    throwIfAborted(options.signal);
+    if (error instanceof RunningHubDownloadError) throw error;
+    const message = error instanceof Error ? error.message : "unknown error";
+    throw new RunningHubDownloadError(`Could not download RunningHub output ${options.url}: ${message}`);
+  }
 }
 
 function getOutputExtension(url: string, contentType: string | null, outputKind: RunningHubOutputKind): string {
@@ -711,6 +750,15 @@ function isSuccessStatus(status: string | undefined): boolean {
 
 function isFailureStatus(status: string | undefined): boolean {
   return Boolean(status && ["fail", "failed", "error", "canceled", "cancelled"].includes(status.toLowerCase()));
+}
+
+function parseRetryAfterMs(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+  const date = Date.parse(value);
+  if (!Number.isFinite(date)) return undefined;
+  return Math.max(0, date - Date.now());
 }
 
 function formatDateFolder(date: Date): string {

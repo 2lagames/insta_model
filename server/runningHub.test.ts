@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildRunningHubCreatePayload,
   cancelRunningHubTask,
+  RunningHubDownloadError,
+  RunningHubPollTimeoutError,
   runRunningHubImageGeneration,
   type RunningHubPromptJob
 } from "./runningHub";
@@ -139,6 +141,51 @@ describe("runRunningHubImageGeneration", () => {
 
       expect(queryAttempts).toBe(2);
       expect(result.assets).toHaveLength(1);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([408, 429, 503])("retries a temporary HTTP %s status response while polling", async (status) => {
+    const tempDir = await mkdtemp(join(tmpdir(), "runninghub-http-retry-"));
+    let queryAttempts = 0;
+    const fetchImpl = (async (url: URL | RequestInfo) => {
+      const requestUrl = new URL(String(url));
+      if (requestUrl.pathname.endsWith("/openapi/v2/query")) {
+        queryAttempts += 1;
+        if (queryAttempts === 1) {
+          return new Response("temporary", {
+            status,
+            headers: status === 429 ? { "Retry-After": "0" } : undefined
+          });
+        }
+        return new Response(JSON.stringify({
+          taskId: "existing-task",
+          status: "SUCCESS",
+          results: [{ url: "https://cdn.example.com/result.png", outputType: "png" }]
+        }));
+      }
+      if (requestUrl.hostname === "cdn.example.com") return new Response("png");
+      throw new Error(`Unexpected request: ${requestUrl.toString()}`);
+    }) as typeof fetch;
+
+    try {
+      await runRunningHubImageGeneration({
+        outputDir: join(tempDir, "output"),
+        baseUrl: "https://runninghub.example.com",
+        fetchImpl,
+        pollIntervalMs: 1,
+        maxPolls: 3,
+        resumeTaskId: "existing-task",
+        config: {
+          apiKey: "key",
+          workflowId: "workflow",
+          bindings: [{ nodeId: "6", fieldName: "text", studioId: "2" }]
+        },
+        jobs: [{ mediaId: "media", label: "Image", prompt: "Prompt" }]
+      });
+
+      expect(queryAttempts).toBe(2);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
@@ -665,9 +712,44 @@ describe("runRunningHubImageGeneration", () => {
         },
         jobs: [{ mediaId: "media-1", label: "Image", imagePath: sourceImagePath, prompt: "{\"a\":1}" }],
         onStatus: () => undefined
-      })).rejects.toThrow("did not return a result after 12 status checks");
+      })).rejects.toBeInstanceOf(RunningHubPollTimeoutError);
 
       expect(outputPolls).toBe(12);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("classifies a failed output download as resumable", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "runninghub-download-failure-"));
+    const fetchImpl = (async (url: URL | RequestInfo) => {
+      const requestUrl = new URL(String(url));
+      if (requestUrl.pathname.endsWith("/openapi/v2/query")) {
+        return new Response(JSON.stringify({
+          taskId: "existing-task",
+          status: "SUCCESS",
+          results: [{ url: "https://cdn.example.com/result.png", outputType: "png" }]
+        }));
+      }
+      if (requestUrl.hostname === "cdn.example.com") {
+        return new Response("temporary", { status: 503 });
+      }
+      throw new Error(`Unexpected request: ${requestUrl.toString()}`);
+    }) as typeof fetch;
+
+    try {
+      await expect(runRunningHubImageGeneration({
+        outputDir: join(tempDir, "output"),
+        baseUrl: "https://runninghub.example.com",
+        fetchImpl,
+        resumeTaskId: "existing-task",
+        config: {
+          apiKey: "key",
+          workflowId: "workflow",
+          bindings: [{ nodeId: "6", fieldName: "text", studioId: "2" }]
+        },
+        jobs: [{ mediaId: "media", label: "Image", prompt: "Prompt" }]
+      })).rejects.toBeInstanceOf(RunningHubDownloadError);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

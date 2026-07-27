@@ -89,7 +89,8 @@ describe("studio preview layout", () => {
 
     expect(queuePage).toContain("Активно {summary.executing} из {generationConcurrency}");
     expect(queuePage).toContain("Ожидают {summary.queued}");
-    expect(queuePage).toContain("до двух генераций одновременно");
+    expect(queuePage).toContain('до {generationConcurrency} {generationConcurrency === 1 ? "генерации" : "генераций"} одновременно');
+    expect(queuePage).not.toContain("до двух генераций одновременно");
     expect(queuePage).not.toContain("выполняются последовательно");
   });
 
