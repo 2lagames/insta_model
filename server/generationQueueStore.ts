@@ -58,10 +58,11 @@ export class GenerationQueueStore {
     return jobs;
   }
 
-  async claimNext(): Promise<GenerationJob | undefined> {
+  async claimNext(concurrency = 1): Promise<GenerationJob | undefined> {
     let claimed: GenerationJob | undefined;
     await this.state.mutate((snapshot) => {
-      if (snapshot.jobs.some((job) => activeStatuses.has(job.status))) return snapshot;
+      const activeCount = snapshot.jobs.filter((job) => activeStatuses.has(job.status)).length;
+      if (activeCount >= concurrency) return snapshot;
       const index = snapshot.jobs.findIndex((job) => job.status === "queued");
       if (index < 0) return snapshot;
       const jobs = [...snapshot.jobs];
@@ -151,11 +152,15 @@ export class GenerationQueueStore {
       jobs: snapshot.jobs.map((item) => {
         if (item.id !== id) return item;
         assertGenerationJobTransition(item.status, "queued");
+        const pollingRequestFailed = item.error?.phase === "poll"
+          && item.error.message.startsWith(`RunningHub request failed while checking task ${item.providerTaskId}:`);
+        const resumeProviderTask = Boolean(item.providerTaskId)
+          && (item.error?.code === "RUNNINGHUB_POLL_UNAVAILABLE" || pollingRequestFailed);
         result = {
           ...item,
           status: "queued",
           attempt: item.attempt + 1,
-          providerTaskId: undefined,
+          providerTaskId: resumeProviderTask ? item.providerTaskId : undefined,
           output: undefined,
           error: undefined,
           cancelRequestedAt: undefined,
@@ -177,15 +182,17 @@ export class GenerationQueueStore {
         let next = job;
         if (job.status === "preparing" || job.status === "uploading") {
           next = updateStatus(job, "queued");
-        } else if (job.status === "submitting" && !job.providerTaskId) {
-          next = updateStatus(job, "recovery_required", {
-            error: {
-              phase: "recovery",
-              code: "AMBIGUOUS_SUBMISSION",
-              message: "RunningHub may already have created this task.",
-              retryable: false
-            }
-          });
+        } else if (job.status === "submitting" || job.status === "running" || job.status === "downloading") {
+          next = job.providerTaskId
+            ? updateStatus(job, "queued")
+            : updateStatus(job, "recovery_required", {
+              error: {
+                phase: "recovery",
+                code: "AMBIGUOUS_SUBMISSION",
+                message: "RunningHub may already have created this task.",
+                retryable: false
+              }
+            });
         }
         if (next !== job) recovered.push(next);
         return next;

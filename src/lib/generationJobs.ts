@@ -70,11 +70,11 @@ const statuses: GenerationJobStatus[] = [
 
 const allowedTransitions: Record<GenerationJobStatus, GenerationJobStatus[]> = {
   queued: ["preparing", "canceled"],
-  preparing: ["uploading", "queued", "canceling", "failed"],
+  preparing: ["uploading", "running", "queued", "canceling", "failed"],
   uploading: ["submitting", "queued", "canceling", "failed"],
-  submitting: ["running", "canceling", "failed", "recovery_required"],
-  running: ["downloading", "canceling", "failed"],
-  downloading: ["succeeded", "canceling", "failed"],
+  submitting: ["running", "queued", "canceling", "failed", "recovery_required"],
+  running: ["downloading", "queued", "canceling", "failed", "recovery_required"],
+  downloading: ["succeeded", "queued", "canceling", "failed", "recovery_required"],
   canceling: ["canceled", "succeeded", "failed"],
   failed: ["queued"],
   recovery_required: ["queued"],
