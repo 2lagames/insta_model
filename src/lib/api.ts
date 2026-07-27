@@ -101,6 +101,7 @@ export type HealthResponse = {
   ok: boolean;
   importProvider?: string;
   version?: string;
+  generationConcurrency?: 1 | 2;
 };
 
 export type PublicConnections = {

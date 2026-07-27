@@ -65,10 +65,17 @@ describe("generation queue presentation", () => {
   it("summarizes actionable queue states", () => {
     expect(summarizeGenerationJobs([
       job("running"),
+      job("downloading"),
       job("queued"),
       job("failed"),
       job("succeeded")
-    ])).toEqual({ active: 2, failed: 1, completed: 1 });
+    ])).toEqual({
+      active: 3,
+      executing: 2,
+      queued: 1,
+      failed: 1,
+      completed: 1
+    });
   });
 
   it("detects each newly completed output exactly once", () => {

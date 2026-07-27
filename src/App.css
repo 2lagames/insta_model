@@ -582,6 +582,17 @@ input {
   line-height: 1.45;
 }
 
+.queue-capacity {
+  width: fit-content;
+  margin-top: 10px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: #e6f0f5;
+  color: #315d74;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .queue-filters,
 .queue-actions {
   display: flex;

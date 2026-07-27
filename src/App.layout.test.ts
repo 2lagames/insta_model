@@ -82,6 +82,17 @@ describe("studio preview layout", () => {
     expect(cssSource).toContain(".queue-recipe-prompt");
   });
 
+  it("shows parallel generation capacity and waiting work", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const queueStart = appSource.indexOf("function GenerationQueuePage");
+    const queuePage = appSource.slice(queueStart, appSource.indexOf("function Preview", queueStart));
+
+    expect(queuePage).toContain("Активно {summary.executing} из {generationConcurrency}");
+    expect(queuePage).toContain("Ожидают {summary.queued}");
+    expect(queuePage).toContain("до двух генераций одновременно");
+    expect(queuePage).not.toContain("выполняются последовательно");
+  });
+
   it("deduplicates enqueue responses and shows visible queued movement feedback", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const cssSource = readFileSync("src/App.css", "utf8");

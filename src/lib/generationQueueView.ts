@@ -30,6 +30,10 @@ const statusPresentation: Record<GenerationJobStatus, { label: string; tone: Gen
   recovery_required: { label: "Требуется проверка", tone: "error" }
 };
 
+const executingStatuses = new Set<GenerationJobStatus>([
+  "preparing", "uploading", "submitting", "running", "downloading", "canceling"
+]);
+
 export function getGenerationStatusPresentation(status: GenerationJobStatus) {
   return statusPresentation[status];
 }
@@ -50,6 +54,8 @@ export function filterGenerationJobs(jobs: GenerationJob[], filter: GenerationQu
 export function summarizeGenerationJobs(jobs: GenerationJob[]) {
   return {
     active: filterGenerationJobs(jobs, "active").length,
+    executing: jobs.filter((job) => executingStatuses.has(job.status)).length,
+    queued: jobs.filter((job) => job.status === "queued").length,
     failed: filterGenerationJobs(jobs, "failed").length,
     completed: filterGenerationJobs(jobs, "completed").length
   };
