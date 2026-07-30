@@ -193,16 +193,13 @@ export class GenerationWorker {
         if (!current) throw error;
         const message = error instanceof Error ? error.message : "Generation failed.";
         if (error instanceof RunningHubTerminalTaskError) {
-          if (current.status === "canceling") {
-            await this.queue.transition(job.id, "canceled", { completedAt: new Date().toISOString() });
-          } else {
-            await this.queue.fail(job.id, {
-              phase: "poll",
-              code: "RUNNINGHUB_PROVIDER_FAILED",
-              message,
-              retryable: false
-            });
-          }
+          await this.queue.resolveProviderFailure(job.id, {
+            phase: "poll",
+            code: "RUNNINGHUB_PROVIDER_FAILED",
+            message,
+            retryable: false
+          }, 3);
+          this.onChange();
           return;
         }
         if (current.status === "canceling") {

@@ -326,6 +326,80 @@ describe("GenerationWorker", () => {
     expect((await queue.list()).map((job) => job.status)).toEqual(["failed", "succeeded"]);
   });
 
+  it("runs a failed RunningHub generation again before ordinary queued work", async () => {
+    const root = await mkdtemp(join(tmpdir(), "generation-worker-"));
+    tempDirs.push(root);
+    const queue = new GenerationQueueStore(root);
+    const jobs = await queue.createJobs("video", [input, input]);
+    const starts: string[] = [];
+    const resumedProviderTaskIds: Array<string | undefined> = [];
+    let firstAttempts = 0;
+    const worker = new GenerationWorker(queue, async (job, context) => {
+      starts.push(job.id);
+      if (job.id === jobs[0].id) {
+        firstAttempts += 1;
+        resumedProviderTaskIds.push(job.providerTaskId);
+      }
+      await context.setPhase("uploading");
+      await context.setPhase("submitting");
+      await context.setTaskId(`provider-${job.id}-${firstAttempts}`);
+      if (job.id === jobs[0].id && firstAttempts === 1) {
+        throw new RunningHubTerminalTaskError("provider workflow failed", "工作流运行失败");
+      }
+      await context.setPhase("downloading");
+      return output(job.id);
+    }, () => undefined, { concurrency: 1 });
+
+    await worker.start();
+    await worker.whenIdle();
+
+    expect(starts).toEqual([jobs[0].id, jobs[0].id, jobs[1].id]);
+    expect(resumedProviderTaskIds).toEqual([undefined, undefined]);
+    expect(await queue.get(jobs[0].id)).toMatchObject({
+      status: "succeeded",
+      attempt: 2
+    });
+  });
+
+  it("stops automatic RunningHub retries after three failed attempts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "generation-worker-"));
+    tempDirs.push(root);
+    const queue = new GenerationQueueStore(root);
+    const jobs = await queue.createJobs("video", [input, input]);
+    const starts: string[] = [];
+    let firstAttempts = 0;
+    const worker = new GenerationWorker(queue, async (job, context) => {
+      starts.push(job.id);
+      await context.setPhase("uploading");
+      await context.setPhase("submitting");
+      if (job.id === jobs[0].id) {
+        firstAttempts += 1;
+        await context.setTaskId(`provider-failed-${firstAttempts}`);
+        throw new RunningHubTerminalTaskError("工作流运行失败", "工作流运行失败");
+      }
+      await context.setTaskId("provider-success");
+      await context.setPhase("downloading");
+      return output(job.id);
+    }, () => undefined, { concurrency: 1 });
+
+    await worker.start();
+    await worker.whenIdle();
+
+    expect(starts).toEqual([jobs[0].id, jobs[0].id, jobs[0].id, jobs[1].id]);
+    expect(await queue.get(jobs[0].id)).toMatchObject({
+      status: "failed",
+      attempt: 3,
+      providerTaskId: "provider-failed-3",
+      error: {
+        phase: "poll",
+        code: "RUNNINGHUB_PROVIDER_FAILED",
+        message: "工作流运行失败",
+        retryable: false
+      }
+    });
+    expect((await queue.get(jobs[1].id))?.status).toBe("succeeded");
+  });
+
   it("reports scheduler failures instead of leaving a rejected promise unobserved", async () => {
     const root = await mkdtemp(join(tmpdir(), "generation-worker-"));
     tempDirs.push(root);
