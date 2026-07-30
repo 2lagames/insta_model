@@ -105,6 +105,55 @@ export class GenerationQueueStore {
     return await this.transition(id, "succeeded", { output, completedAt: new Date().toISOString() });
   }
 
+  async resolveProviderFailure(
+    id: string,
+    error: GenerationJobError,
+    maxAttempts = 3
+  ): Promise<GenerationJob> {
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+      throw new Error("Provider failure retry limit must be a positive integer.");
+    }
+    let result: GenerationJob | undefined;
+    await this.state.mutate((snapshot) => {
+      const index = snapshot.jobs.findIndex((job) => job.id === id);
+      if (index < 0) throw new Error(`Generation job ${id} was not found.`);
+      const job = snapshot.jobs[index];
+      if (job.status !== "running" && job.status !== "downloading" && job.status !== "canceling") {
+        throw new Error(`Generation job ${id} cannot resolve a provider failure from ${job.status}.`);
+      }
+
+      const jobs = [...snapshot.jobs];
+      if (job.status === "canceling") {
+        result = updateStatus(job, "canceled", { completedAt: new Date().toISOString() });
+        jobs[index] = result;
+        return { ...snapshot, jobs };
+      }
+      if (job.attempt >= maxAttempts) {
+        result = updateStatus(job, "failed", {
+          error,
+          completedAt: new Date().toISOString()
+        });
+        jobs[index] = result;
+        return { ...snapshot, jobs };
+      }
+
+      result = {
+        ...updateStatus(job, "queued", {
+          providerTaskId: undefined,
+          output: undefined,
+          error: undefined,
+          cancelRequestedAt: undefined,
+          startedAt: undefined,
+          completedAt: undefined
+        }),
+        attempt: job.attempt + 1
+      };
+      jobs[index] = result;
+      return { ...snapshot, jobs: moveQueuedJobFirst(jobs, id) };
+    });
+    return result!;
+  }
+
   async recordProviderTaskId(id: string, providerTaskId: string): Promise<GenerationJob> {
     let result: GenerationJob | undefined;
     await this.state.mutate((snapshot) => ({

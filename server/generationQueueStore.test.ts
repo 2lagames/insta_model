@@ -257,6 +257,77 @@ describe("GenerationQueueStore", () => {
     expect((await store.retry(job.id)).providerTaskId).toBeUndefined();
   });
 
+  it("requeues a provider failure ahead of ordinary queued jobs with a fresh attempt", async () => {
+    const store = await createStore();
+    const [ordinary, retryJob] = await store.createJobs("video", [input, input]);
+    await store.transition(retryJob.id, "preparing");
+    await store.transition(retryJob.id, "uploading");
+    await store.transition(retryJob.id, "submitting");
+    await store.recordProviderTaskId(retryJob.id, "failed-provider-task");
+
+    const retried = await store.resolveProviderFailure(retryJob.id, {
+      phase: "poll",
+      code: "RUNNINGHUB_PROVIDER_FAILED",
+      message: "工作流运行失败",
+      retryable: false
+    }, 3);
+
+    expect(retried.status).toBe("queued");
+    expect(retried.attempt).toBe(2);
+    expect(retried.providerTaskId).toBeUndefined();
+    expect(retried.error).toBeUndefined();
+    expect((await store.list()).map((job) => job.id)).toEqual([retryJob.id, ordinary.id]);
+  });
+
+  it("fails a provider generation after the third automatic attempt", async () => {
+    const store = await createStore();
+    const [job] = await store.createJobs("video", [input]);
+    const providerError = {
+      phase: "poll" as const,
+      code: "RUNNINGHUB_PROVIDER_FAILED",
+      message: "工作流运行失败",
+      retryable: false
+    };
+
+    for (const taskId of ["provider-task-1", "provider-task-2", "provider-task-3"]) {
+      await store.transition(job.id, "preparing");
+      await store.transition(job.id, "uploading");
+      await store.transition(job.id, "submitting");
+      await store.recordProviderTaskId(job.id, taskId);
+      const resolved = await store.resolveProviderFailure(job.id, providerError, 3);
+      if (taskId !== "provider-task-3") {
+        expect(resolved.status).toBe("queued");
+      }
+    }
+
+    expect(await store.get(job.id)).toMatchObject({
+      status: "failed",
+      attempt: 3,
+      providerTaskId: "provider-task-3",
+      error: providerError
+    });
+  });
+
+  it("resolves a user-canceled provider failure without retrying it", async () => {
+    const store = await createStore();
+    const [job] = await store.createJobs("video", [input]);
+    await store.transition(job.id, "preparing");
+    await store.transition(job.id, "uploading");
+    await store.transition(job.id, "submitting");
+    await store.recordProviderTaskId(job.id, "canceled-provider-task");
+    await store.requestCancel(job.id);
+
+    const resolved = await store.resolveProviderFailure(job.id, {
+      phase: "poll",
+      code: "RUNNINGHUB_PROVIDER_FAILED",
+      message: "已取消",
+      retryable: false
+    }, 3);
+
+    expect(resolved.status).toBe("canceled");
+    expect(resolved.attempt).toBe(1);
+  });
+
   it("cancels a queued job without claiming it", async () => {
     const store = await createStore();
     const [job] = await store.createJobs("image", [input]);
