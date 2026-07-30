@@ -8,6 +8,7 @@ import {
   cancelRunningHubTask,
   RunningHubDownloadError,
   RunningHubPollTimeoutError,
+  RunningHubTerminalTaskError,
   runRunningHubImageGeneration,
   type RunningHubPromptJob
 } from "./runningHub";
@@ -102,6 +103,87 @@ describe("cancelRunningHubTask", () => {
 
 describe("runRunningHubImageGeneration", () => {
   const sourceImagePath = fileURLToPath(import.meta.url);
+
+  it.each([
+    "FAILED",
+    "失败",
+    "工作流运行失败"
+  ])("classifies RunningHub task status %s as a terminal provider failure", async (status) => {
+    const tempDir = await mkdtemp(join(tmpdir(), "runninghub-provider-failure-"));
+    const fetchImpl = (async (url: URL | RequestInfo) => {
+      const requestUrl = new URL(String(url));
+      if (requestUrl.pathname.endsWith("/openapi/v2/query")) {
+        return new Response(JSON.stringify({
+          taskId: "existing-task",
+          status,
+          errorMessage: "provider workflow failed",
+          results: null
+        }));
+      }
+      throw new Error(`Unexpected request: ${requestUrl.toString()}`);
+    }) as typeof fetch;
+
+    try {
+      await expect(runRunningHubImageGeneration({
+        outputDir: join(tempDir, "output"),
+        baseUrl: "https://runninghub.example.com",
+        fetchImpl,
+        resumeTaskId: "existing-task",
+        pollIntervalMs: 0,
+        maxPolls: 1,
+        config: {
+          apiKey: "key",
+          workflowId: "workflow",
+          bindings: [{ nodeId: "6", fieldName: "text", studioId: "2" }]
+        },
+        jobs: [{ mediaId: "media", label: "Image", prompt: "Prompt" }]
+      })).rejects.toMatchObject({
+        name: "RunningHubTerminalTaskError",
+        status
+      });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("classifies RunningHub query code 805 as a terminal provider failure", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "runninghub-provider-failure-"));
+    const fetchImpl = (async (url: URL | RequestInfo) => {
+      const requestUrl = new URL(String(url));
+      if (requestUrl.pathname.endsWith("/openapi/v2/query")) {
+        return new Response(JSON.stringify({
+          code: 805,
+          msg: "任务执行失败",
+          data: {
+            failedReason: {
+              node_name: "SaveImage",
+              exception_message: "workflow failed"
+            }
+          }
+        }));
+      }
+      throw new Error(`Unexpected request: ${requestUrl.toString()}`);
+    }) as typeof fetch;
+
+    try {
+      await expect(runRunningHubImageGeneration({
+        outputDir: join(tempDir, "output"),
+        baseUrl: "https://runninghub.example.com",
+        fetchImpl,
+        resumeTaskId: "existing-task",
+        pollIntervalMs: 0,
+        maxPolls: 1,
+        config: {
+          apiKey: "key",
+          workflowId: "workflow",
+          bindings: [{ nodeId: "6", fieldName: "text", studioId: "2" }]
+        },
+        jobs: [{ mediaId: "media", label: "Image", prompt: "Prompt" }]
+      })).rejects.toBeInstanceOf(RunningHubTerminalTaskError);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
 
   it("keeps polling an existing task after a transient network failure", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "runninghub-poll-retry-"));

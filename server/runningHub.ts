@@ -45,6 +45,19 @@ export class RunningHubTerminalTaskError extends Error {
 const defaultRunningHubBaseUrl = process.env.RUNNINGHUB_API_BASE_URL ?? "https://www.runninghub.ai";
 const defaultPollIntervalMs = Number(process.env.RUNNINGHUB_POLL_INTERVAL_MS ?? 5_000);
 const defaultMaxPolls = Number(process.env.RUNNINGHUB_MAX_POLLS ?? 360);
+const terminalFailureStatuses = new Set([
+  "fail",
+  "failed",
+  "error",
+  "canceled",
+  "cancelled",
+  "失败",
+  "错误",
+  "异常",
+  "取消",
+  "已取消",
+  "工作流运行失败"
+]);
 
 type RunningHubExecutionType = Exclude<RunningHubInstanceType, "">;
 
@@ -466,8 +479,15 @@ async function waitForTaskResult(options: {
       continue;
     }
     const payload = await response.json() as unknown;
-    assertRunningHubOk(payload, `check task ${options.taskId}`);
     const status = extractStatus(payload);
+    if (isFailureStatus(status) || isTaskExecutionFailurePayload(payload)) {
+      const terminalStatus = status?.trim() || "FAILED";
+      throw new RunningHubTerminalTaskError(
+        `RunningHub task ${options.taskId} failed with status: ${terminalStatus}${getRunningHubErrorMessage(payload)}`,
+        terminalStatus
+      );
+    }
+    assertRunningHubOk(payload, `check task ${options.taskId}`);
 
     options.onStatus?.({
       tone: "running",
@@ -485,12 +505,6 @@ async function waitForTaskResult(options: {
         source: "runninghub",
         message: `RunningHub task ${options.taskId}: completed but result file is not ready yet (${attempt}/${options.maxPolls}).`
       });
-    }
-    if (isFailureStatus(status)) {
-      throw new RunningHubTerminalTaskError(
-        `RunningHub task ${options.taskId} failed with status: ${status}${getRunningHubErrorMessage(payload)}`,
-        status!
-      );
     }
     await sleep(options.pollIntervalMs, options.signal);
   }
@@ -652,8 +666,12 @@ function getRunningHubErrorMessage(payload: unknown): string {
     return "";
   }
   const record = payload as Record<string, unknown>;
-  const message = record.errorMessage ?? record.message;
-  return typeof message === "string" && message.trim() ? `: ${message}` : "";
+  const message = record.errorMessage ?? record.message ?? record.msg;
+  if (typeof message === "string" && message.trim()) {
+    return `: ${message}`;
+  }
+  const failedReason = findNestedField(payload, "failedReason");
+  return failedReason === undefined ? "" : `: ${JSON.stringify(failedReason)}`;
 }
 
 function collectStringFields(value: unknown, fieldNames: string[]): string[] {
@@ -749,7 +767,46 @@ function isSuccessStatus(status: string | undefined): boolean {
 }
 
 function isFailureStatus(status: string | undefined): boolean {
-  return Boolean(status && ["fail", "failed", "error", "canceled", "cancelled"].includes(status.toLowerCase()));
+  return Boolean(status && terminalFailureStatuses.has(status.trim().toLowerCase()));
+}
+
+function isTaskExecutionFailurePayload(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return false;
+  }
+  if ((payload as Record<string, unknown>).code === 805) {
+    return true;
+  }
+  const failedReason = findNestedField(payload, "failedReason");
+  if (typeof failedReason === "string") {
+    return failedReason.trim().length > 0;
+  }
+  if (Array.isArray(failedReason)) {
+    return failedReason.length > 0;
+  }
+  return Boolean(failedReason && typeof failedReason === "object" && Object.keys(failedReason).length > 0);
+}
+
+function findNestedField(value: unknown, fieldName: string): unknown {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const result = findNestedField(item, fieldName);
+      if (result !== undefined) return result;
+    }
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (fieldName in record) {
+    return record[fieldName];
+  }
+  for (const item of Object.values(record)) {
+    const result = findNestedField(item, fieldName);
+    if (result !== undefined) return result;
+  }
+  return undefined;
 }
 
 function parseRetryAfterMs(value: string | null): number | undefined {
