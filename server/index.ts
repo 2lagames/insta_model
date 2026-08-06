@@ -335,7 +335,8 @@ app.post("/api/generation/image-prompts", async (request, response) => {
           provider: ollama.provider,
           apiKey: ollama.apiKey,
           model: ollama.model,
-          prompt: ollama.instruction,
+          systemPrompt: ollama.instruction,
+          userPrompt: optionalString(request.body?.userPrompt),
           imageBase64: await readFile(resolveStudioMediaPath(mediaItem.imagePath), "base64"),
           signal: generation.signal
         })

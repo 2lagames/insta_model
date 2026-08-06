@@ -4,6 +4,7 @@ import {
   clearConnectionKey,
   cleanupDuplicateImports,
   generateImagePrompts,
+  generateImagePromptsWithOptions,
   generateImages,
   generateImagesWithOptions,
   importInstagramUrl,
@@ -160,7 +161,7 @@ describe("generateImagePrompts", () => {
   });
 
   it("returns the updated media session produced by prompt generation", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
       prompts: [{
         mediaId: "item:asset:image",
         label: "Image",
@@ -188,12 +189,17 @@ describe("generateImagePrompts", () => {
       }
     })));
 
-    await expect(generateImagePrompts([{
+    const media = {
       id: "item:asset:image",
       label: "Image",
       imagePath: "/input/20260625/import/image-001.jpg",
       sourceKind: "photo"
-    }])).resolves.toMatchObject({
+    } as const;
+
+    await expect(generateImagePromptsWithOptions([media], {
+      ollamaPresetId: "ol-1",
+      userPrompt: "Keep the visible lettering exact."
+    })).resolves.toMatchObject({
       prompts: [{
         mediaId: "item:asset:image",
         prompt: "{\"high_level_description\":\"test\"}"
@@ -204,6 +210,16 @@ describe("generateImagePrompts", () => {
           "item:asset:image": "scene_001_bedroom"
         }
       }
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith("/api/generation/image-prompts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        media: [media],
+        ollamaPresetId: "ol-1",
+        userPrompt: "Keep the visible lettering exact."
+      })
     });
   });
 });

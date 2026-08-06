@@ -269,13 +269,17 @@ export async function generateImagePrompts(media: PromptMediaInput[]): Promise<P
   return await generateImagePromptsWithOptions(media);
 }
 
-export async function generateImagePromptsWithOptions(media: PromptMediaInput[], options: { ollamaPresetId?: string; signal?: AbortSignal } = {}): Promise<PromptGenerationResult> {
+export async function generateImagePromptsWithOptions(media: PromptMediaInput[], options: { ollamaPresetId?: string; userPrompt?: string; signal?: AbortSignal } = {}): Promise<PromptGenerationResult> {
   const response = await apiFetch("/api/generation/image-prompts", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ media, ...(options.ollamaPresetId ? { ollamaPresetId: options.ollamaPresetId } : {}) }),
+    body: JSON.stringify({
+      media,
+      ...(options.ollamaPresetId ? { ollamaPresetId: options.ollamaPresetId } : {}),
+      ...(options.userPrompt?.trim() ? { userPrompt: options.userPrompt } : {})
+    }),
     ...(options.signal ? { signal: options.signal } : {})
   });
   await assertOk(response);

@@ -129,6 +129,7 @@ export default function App() {
   const [draggedStudioActionId, setDraggedStudioActionId] = useState<string | null>(null);
   const [generationPrefixOptions, setGenerationPrefixOptions] = useState("");
   const [generationPrefixSelection, setGenerationPrefixSelection] = useState("");
+  const [ollamaUserPrompt, setOllamaUserPrompt] = useState("");
   const [isEditingGenerationPrefixes, setIsEditingGenerationPrefixes] = useState(false);
   const [cloudModels, setCloudModels] = useState<string[]>([]);
   const [localModels, setLocalModels] = useState<string[]>([]);
@@ -601,6 +602,7 @@ export default function App() {
       setPromptDocuments([]);
       setUrl("");
       setUrlNotice(null);
+      setOllamaUserPrompt("");
     } catch (error) {
       recordStatus({ tone: "error", message: toErrorMessage(error) });
     } finally {
@@ -616,7 +618,7 @@ export default function App() {
   ): Promise<Array<{ mediaId: string; label: string; prompt: string }>> {
     let generatedPrompts: Array<{ mediaId: string; label: string; prompt: string }> = [];
     for (const media of promptMedia) {
-      const generated = await generateImagePromptsWithOptions([media], { ollamaPresetId, signal });
+      const generated = await generateImagePromptsWithOptions([media], { ollamaPresetId, userPrompt: ollamaUserPrompt, signal });
       const generatedPrompt = generated.prompts[0];
       if (!generatedPrompt) {
         continue;
@@ -679,7 +681,7 @@ export default function App() {
       recordStatus({ tone: "ready", message: `Generated ${generatedPrompts.length} prompt(s).` });
     } catch (error) {
       if (!isAbortError(error)) {
-        recordStatus({ tone: "error", message: toErrorMessage(error) });
+        setStatus({ tone: "error", message: toErrorMessage(error) });
       }
     } finally {
       setIsGeneratingPrompt(false);
@@ -1117,11 +1119,13 @@ export default function App() {
                 generationPrefixOptions={generationPrefixOptions}
                 generationPrefixSelection={generationPrefixSelection}
                 imageGenerationsPerMedia={imageGenerationsPerMedia}
+                ollamaUserPrompt={ollamaUserPrompt}
                 ollamaPresets={ollamaPresets}
                 runningHubWorkflows={runningHubWorkflows}
                 studioActionButtons={studioActionButtons}
                 onChangePrefix={handleChangeGenerationPrefix}
                 onChangeImageGenerationsPerMedia={setImageGenerationsPerMedia}
+                onChangeOllamaUserPrompt={setOllamaUserPrompt}
                 onEditPrefixes={() => setIsEditingGenerationPrefixes(true)}
                 isSessionMutationBusy={isSessionMutationBusy}
                 isGeneratingPrompt={isGeneratingPrompt}
@@ -1365,11 +1369,13 @@ function Preview({
   generationPrefixOptions,
   generationPrefixSelection,
   imageGenerationsPerMedia,
+  ollamaUserPrompt,
   ollamaPresets,
   runningHubWorkflows,
   studioActionButtons,
   onChangePrefix,
   onChangeImageGenerationsPerMedia,
+  onChangeOllamaUserPrompt,
   onEditPrefixes,
   isSessionMutationBusy,
   isGeneratingPrompt,
@@ -1402,11 +1408,13 @@ function Preview({
   generationPrefixOptions: string;
   generationPrefixSelection: string;
   imageGenerationsPerMedia: number;
+  ollamaUserPrompt: string;
   ollamaPresets: OllamaPreset[];
   runningHubWorkflows: RunningHubWorkflowPreset[];
   studioActionButtons: StudioActionButton[];
   onChangePrefix: (value: string) => void;
   onChangeImageGenerationsPerMedia: (value: number) => void;
+  onChangeOllamaUserPrompt: (value: string) => void;
   onEditPrefixes: () => void;
   isSessionMutationBusy: boolean;
   isGeneratingPrompt: boolean;
@@ -1468,11 +1476,13 @@ function Preview({
           generationPrefixOptions={generationPrefixOptions}
           generationPrefixSelection={generationPrefixSelection}
           imageGenerationsPerMedia={imageGenerationsPerMedia}
+          ollamaUserPrompt={ollamaUserPrompt}
           ollamaPresets={ollamaPresets}
           runningHubWorkflows={runningHubWorkflows}
           studioActionButtons={studioActionButtons}
           onChangePrefix={onChangePrefix}
           onChangeImageGenerationsPerMedia={onChangeImageGenerationsPerMedia}
+          onChangeOllamaUserPrompt={onChangeOllamaUserPrompt}
           onEditPrefixes={onEditPrefixes}
           isSessionMutationBusy={isSessionMutationBusy}
           isGeneratingImages={isGeneratingImages}
@@ -1520,11 +1530,13 @@ function GenerationWorkspace({
   generationPrefixOptions,
   generationPrefixSelection,
   imageGenerationsPerMedia,
+  ollamaUserPrompt,
   ollamaPresets,
   runningHubWorkflows,
   studioActionButtons,
   onChangePrefix,
   onChangeImageGenerationsPerMedia,
+  onChangeOllamaUserPrompt,
   onEditPrefixes,
   isSessionMutationBusy,
   isGeneratingImages,
@@ -1544,11 +1556,13 @@ function GenerationWorkspace({
   generationPrefixOptions: string;
   generationPrefixSelection: string;
   imageGenerationsPerMedia: number;
+  ollamaUserPrompt: string;
   ollamaPresets: OllamaPreset[];
   runningHubWorkflows: RunningHubWorkflowPreset[];
   studioActionButtons: StudioActionButton[];
   onChangePrefix: (value: string) => void;
   onChangeImageGenerationsPerMedia: (value: number) => void;
+  onChangeOllamaUserPrompt: (value: string) => void;
   onEditPrefixes: () => void;
   isSessionMutationBusy: boolean;
   isGeneratingImages: boolean;
@@ -1570,38 +1584,48 @@ function GenerationWorkspace({
   return (
     <div className="generation-column">
       <div className="panel-label">Generation workspace</div>
-      <aside className="generation-panel">
-        <div className="generation-prefix-control">
-          <select onChange={(event) => onChangePrefix(event.target.value)} value={generationPrefixSelection}>
-            <option value="">Не выбрано</option>
-            {parseGenerationPrefixes(generationPrefixOptions).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
-          </select>
-          <button aria-label="Редактировать варианты промта" onClick={onEditPrefixes} type="button">✎</button>
-        </div>
-        <div className="studio-action-list">
-          {studioActionButtons.map((action) => {
-            const presets = action.type === "text" ? ollamaPresets : runningHubWorkflows;
-            const ready = Boolean(action.presetId && presets.some((preset) => preset.id === action.presetId));
-            const isGenerating = action.type === "text" ? isGeneratingPrompt : action.type === "image" ? isGeneratingImages : isGeneratingVideos;
-            const actionLabel = action.type === "text" ? `Generate prompt (${selectedForGenerationCount})` : action.type === "image" ? `Image generation (${imageGenerationCount})` : "Video generation";
-            return <div className={`studio-action-button studio-action-${action.type}`} draggable={true} key={action.id} onDragEnd={() => onDragStudioAction(null)} onDragOver={(event) => event.preventDefault()} onDragStart={() => onDragStudioAction(action.id)} onDrop={() => onDropStudioAction(action.id)}>
-              <button disabled={isSessionMutationBusy || selectedForGenerationCount === 0 || !ready} onClick={() => action.presetId && (action.type === "text" ? onGenerateImagePrompts(action.presetId) : action.type === "image" ? onGenerateImages(action.presetId) : onGenerateVideos(action.presetId))} type="button">{isGenerating ? "Generating" : actionLabel}</button>
-              <select aria-label={action.type === "text" ? "Workflow Ollama" : "Workflow RunningHub"} className="studio-action-select studio-workflow-select" onChange={(event) => onUpdateStudioAction(action.id, { presetId: event.target.value || undefined })} value={action.presetId ?? ""}>
-                <option value="">□</option>
-                {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.displayId}</option>)}
-              </select>
-              {action.type === "image" ? <select aria-label="Количество генераций на изображение" className="studio-action-select" onChange={(event) => onChangeImageGenerationsPerMedia(Number(event.target.value))} value={imageGenerationsPerMedia}>{Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count}</option>)}</select> : null}
-              <button className="studio-action-remove" onClick={() => onRemoveStudioAction(action.id)} type="button">−</button>
-            </div>;
-          })}
-        </div>
-        <button onClick={onCancelGeneration} type="button">Отмена</button>
-        <div className="studio-action-add">
-          <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("text")} type="button">＋ Текст</button>
-          <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("image")} type="button">＋ Изображение</button>
-          <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("video")} type="button">＋ Видео</button>
-        </div>
-      </aside>
+      <div className="generation-stage">
+        <aside className="generation-panel">
+          <div className="generation-prefix-control">
+            <select onChange={(event) => onChangePrefix(event.target.value)} value={generationPrefixSelection}>
+              <option value="">Не выбрано</option>
+              {parseGenerationPrefixes(generationPrefixOptions).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
+            </select>
+            <button aria-label="Редактировать варианты промта" onClick={onEditPrefixes} type="button">✎</button>
+          </div>
+          <div className="studio-action-list">
+            {studioActionButtons.map((action) => {
+              const presets = action.type === "text" ? ollamaPresets : runningHubWorkflows;
+              const ready = Boolean(action.presetId && presets.some((preset) => preset.id === action.presetId));
+              const isGenerating = action.type === "text" ? isGeneratingPrompt : action.type === "image" ? isGeneratingImages : isGeneratingVideos;
+              const actionLabel = action.type === "text" ? `Generate prompt (${selectedForGenerationCount})` : action.type === "image" ? `Image generation (${imageGenerationCount})` : "Video generation";
+              return <div className={`studio-action-button studio-action-${action.type}`} draggable={true} key={action.id} onDragEnd={() => onDragStudioAction(null)} onDragOver={(event) => event.preventDefault()} onDragStart={() => onDragStudioAction(action.id)} onDrop={() => onDropStudioAction(action.id)}>
+                <button disabled={isSessionMutationBusy || selectedForGenerationCount === 0 || !ready} onClick={() => action.presetId && (action.type === "text" ? onGenerateImagePrompts(action.presetId) : action.type === "image" ? onGenerateImages(action.presetId) : onGenerateVideos(action.presetId))} type="button">{isGenerating ? "Generating" : actionLabel}</button>
+                <select aria-label={action.type === "text" ? "Workflow Ollama" : "Workflow RunningHub"} className="studio-action-select studio-workflow-select" onChange={(event) => onUpdateStudioAction(action.id, { presetId: event.target.value || undefined })} value={action.presetId ?? ""}>
+                  <option value="">□</option>
+                  {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.displayId}</option>)}
+                </select>
+                {action.type === "image" ? <select aria-label="Количество генераций на изображение" className="studio-action-select" onChange={(event) => onChangeImageGenerationsPerMedia(Number(event.target.value))} value={imageGenerationsPerMedia}>{Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count}</option>)}</select> : null}
+                <button className="studio-action-remove" onClick={() => onRemoveStudioAction(action.id)} type="button">−</button>
+              </div>;
+            })}
+          </div>
+          <button onClick={onCancelGeneration} type="button">Отмена</button>
+          <div className="studio-action-add">
+            <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("text")} type="button">＋ Текст</button>
+            <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("image")} type="button">＋ Изображение</button>
+            <button disabled={isSessionMutationBusy} onClick={() => onAddStudioAction("video")} type="button">＋ Видео</button>
+          </div>
+        </aside>
+        <textarea
+          aria-label="Запрос для Ollama"
+          className="ollama-user-prompt"
+          disabled={isSessionMutationBusy}
+          onChange={(event) => onChangeOllamaUserPrompt(event.target.value)}
+          placeholder="Дополнительный запрос для Ollama"
+          value={ollamaUserPrompt}
+        />
+      </div>
     </div>
   );
 }

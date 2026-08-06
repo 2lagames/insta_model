@@ -93,6 +93,8 @@ describe("image prompt activity", () => {
 
     expect(promptRoute).toContain("connectionsStore.readPrivate()");
     expect(promptRoute).toContain("generateOllamaPrompt");
+    expect(promptRoute).toContain("systemPrompt: ollama.instruction");
+    expect(promptRoute).toContain("userPrompt: optionalString(request.body?.userPrompt)");
     expect(promptRoute).toContain("response.json({ prompts, session })");
   });
 

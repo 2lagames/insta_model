@@ -16,7 +16,8 @@ export type GenerateOllamaPromptInput = {
   provider: OllamaProvider;
   apiKey?: string;
   model: string;
-  prompt: string;
+  systemPrompt: string;
+  userPrompt?: string;
   imageBase64: string;
   fetchImpl?: FetchLike;
   signal?: AbortSignal;
@@ -24,6 +25,7 @@ export type GenerateOllamaPromptInput = {
 
 const cloudBaseUrl = "https://ollama.com";
 const localBaseUrl = "http://127.0.0.1:11434";
+const defaultUserPrompt = "Process the attached image according to the system instructions.";
 
 export async function listOllamaModels(input: ListOllamaModelsInput): Promise<OllamaModel[]> {
   const response = await getFetch(input.fetchImpl)(new URL("/api/tags", getBaseUrl(input.provider)), getAuthInit(input));
@@ -36,7 +38,9 @@ export async function listOllamaModels(input: ListOllamaModelsInput): Promise<Ol
 }
 
 export async function generateOllamaPrompt(input: GenerateOllamaPromptInput): Promise<string> {
-  const response = await getFetch(input.fetchImpl)(new URL("/api/generate", getBaseUrl(input.provider)), {
+  const fetchImpl = getFetch(input.fetchImpl);
+  const url = new URL("/api/generate", getBaseUrl(input.provider));
+  const requestInit: RequestInit = {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -44,12 +48,18 @@ export async function generateOllamaPrompt(input: GenerateOllamaPromptInput): Pr
     },
     body: JSON.stringify({
       model: input.model,
-      prompt: input.prompt,
+      system: input.systemPrompt,
+      prompt: input.userPrompt?.trim() || defaultUserPrompt,
       images: [input.imageBase64],
       stream: false
     }),
     ...(input.signal ? { signal: input.signal } : {})
-  });
+  };
+  let response = await fetchImpl(url, requestInit);
+  if (response.status === 500 || response.status === 502) {
+    await response.text();
+    response = await fetchImpl(url, requestInit);
+  }
   if (!response.ok) {
     throw new Error(`Ollama prompt generation failed with ${response.status}: ${await response.text()}`);
   }

@@ -34,14 +34,15 @@ describe("listOllamaModels", () => {
 });
 
 describe("generateOllamaPrompt", () => {
-  it("sends the Cloud prompt and image with bearer authentication", async () => {
+  it("sends the preset instruction as system and the Studio text as the user prompt", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ response: "  generated prompt  " })));
 
     await expect(generateOllamaPrompt({
       provider: "cloud",
       apiKey: "cloud-key",
       model: "gemma3",
-      prompt: "Describe this image.",
+      systemPrompt: "Return an Ideogram JSON prompt.",
+      userPrompt: "Make the lighting warmer.",
       imageBase64: "image-bytes",
       fetchImpl
     })).resolves.toBe("generated prompt");
@@ -54,20 +55,44 @@ describe("generateOllamaPrompt", () => {
       },
       body: JSON.stringify({
         model: "gemma3",
-        prompt: "Describe this image.",
+        system: "Return an Ideogram JSON prompt.",
+        prompt: "Make the lighting warmer.",
         images: ["image-bytes"],
         stream: false
       })
     });
   });
 
-  it("sends the local prompt and image without bearer authentication", async () => {
+  it("uses a neutral user prompt when the Studio text is blank", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ response: "local prompt" })));
+
+    await generateOllamaPrompt({
+      provider: "local",
+      model: "qwen2.5vl:7b",
+      systemPrompt: "Return an Ideogram JSON prompt.",
+      userPrompt: "   ",
+      imageBase64: "image-bytes",
+      fetchImpl
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(new URL("/api/generate", "http://127.0.0.1:11434"), expect.objectContaining({
+      body: JSON.stringify({
+        model: "qwen2.5vl:7b",
+        system: "Return an Ideogram JSON prompt.",
+        prompt: "Process the attached image according to the system instructions.",
+        images: ["image-bytes"],
+        stream: false
+      })
+    }));
+  });
+
+  it("sends the local system prompt and image without bearer authentication", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ response: "local prompt" })));
 
     await expect(generateOllamaPrompt({
       provider: "local",
       model: "qwen2.5vl:7b",
-      prompt: "Describe this image.",
+      systemPrompt: "Describe this image.",
       imageBase64: "image-bytes",
       fetchImpl
     })).resolves.toBe("local prompt");
@@ -77,10 +102,54 @@ describe("generateOllamaPrompt", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "qwen2.5vl:7b",
-        prompt: "Describe this image.",
+        system: "Describe this image.",
+        prompt: "Process the attached image according to the system instructions.",
         images: ["image-bytes"],
         stream: false
       })
     });
+  });
+
+  it.each([500, 502])("retries one transient %s response before succeeding", async (status) => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ error: "temporary Ollama failure" }),
+        { status }
+      ))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ response: "recovered prompt" })));
+
+    await expect(generateOllamaPrompt({
+      provider: "cloud",
+      apiKey: "cloud-key",
+      model: "gemma4:31b",
+      systemPrompt: "Describe this image.",
+      imageBase64: "image-bytes",
+      fetchImpl
+    })).resolves.toBe("recovered prompt");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves the final Ollama reference after the retry also fails", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ error: "Internal Server Error (ref: first-ref)" }),
+        { status: 500 }
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ error: "Internal Server Error (ref: final-ref)" }),
+        { status: 500 }
+      ));
+
+    await expect(generateOllamaPrompt({
+      provider: "cloud",
+      apiKey: "cloud-key",
+      model: "gemma4:31b",
+      systemPrompt: "Describe this image.",
+      imageBase64: "image-bytes",
+      fetchImpl
+    })).rejects.toThrow("Ollama prompt generation failed with 500: {\"error\":\"Internal Server Error (ref: final-ref)\"}");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });

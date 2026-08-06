@@ -68,6 +68,17 @@ describe("studio preview layout", () => {
     expect(queueEffect.indexOf("setItems((current) =>")).toBeLessThan(queueEffect.indexOf("const loadedSession = await listImports()"));
   });
 
+  it("does not append a second UI activity when prompt generation already failed on the server", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const handlerStart = appSource.indexOf("async function handleGenerateImagePrompts");
+    const handler = appSource.slice(handlerStart, appSource.indexOf("async function handleSavePrompt", handlerStart));
+    const errorCatchStart = handler.indexOf("} catch (error) {");
+    const errorCatch = handler.slice(errorCatchStart, handler.indexOf("} finally {", errorCatchStart));
+
+    expect(errorCatch).toContain('setStatus({ tone: "error", message: toErrorMessage(error) })');
+    expect(errorCatch).not.toContain("recordStatus(");
+  });
+
   it("renders the frozen media and prompt recipe for every queue job", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const cssSource = readFileSync("src/App.css", "utf8");
@@ -118,6 +129,33 @@ describe("studio preview layout", () => {
     expect(cssSource).toContain("grid-auto-rows: minmax(42px, auto);");
     expect(cssSource).not.toContain("--studio-stage-height");
     expect(cssSource).toContain("overflow-y: auto");
+  });
+
+  it("fills the space below Generation workspace with a scrollable Ollama user prompt", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const cssSource = readFileSync("src/App.css", "utf8");
+
+    expect(appSource).toContain('const [ollamaUserPrompt, setOllamaUserPrompt] = useState("")');
+    expect(appSource).toContain('aria-label="Запрос для Ollama"');
+    expect(appSource).toContain('className="ollama-user-prompt"');
+    expect(appSource).toContain("value={ollamaUserPrompt}");
+    expect(appSource).toContain("onChange={(event) => onChangeOllamaUserPrompt(event.target.value)}");
+    expect(appSource).toContain("userPrompt: ollamaUserPrompt");
+    expect(appSource).toContain("setOllamaUserPrompt(\"\")");
+    expect(cssSource).toContain(".generation-stage {");
+    expect(cssSource).toContain("height: clamp(560px, 68vh, 780px);");
+    expect(cssSource).toContain(".ollama-user-prompt {");
+    expect(cssSource).toContain("flex: 1;");
+    expect(cssSource).toContain("overflow-y: auto;");
+  });
+
+  it("keeps an oversized Studio action list inside the preview-height generation stage", () => {
+    const cssSource = readFileSync("src/App.css", "utf8");
+    const panelRuleStart = cssSource.indexOf(".generation-panel {\n  display: grid;");
+    const panelRule = cssSource.slice(panelRuleStart, cssSource.indexOf("}\n", panelRuleStart));
+
+    expect(panelRule).toContain("min-height: 0;");
+    expect(panelRule).toContain("overflow-y: auto;");
   });
 
   it("places the Media label above a stage-height selector", () => {
