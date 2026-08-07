@@ -22,7 +22,10 @@ describe("scanSecretText", () => {
     "input/source.png",
     "output/result.png",
     ".env.production",
-    "private/credentials.json"
+    "private/credentials.json",
+    ".superpowers/sdd/review-report.md",
+    "docs/superpowers/specs/internal-design.md",
+    "plan.md"
   ])("rejects a private runtime path: %s", (path) => {
     expect(scanSecretText(path, "ordinary content")).toContain(`${path}: private runtime path must not be committed`);
   });
