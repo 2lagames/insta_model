@@ -559,13 +559,21 @@ app.post("/api/generation/videos", async (request, response) => {
 });
 
 app.post("/api/generation/cancel", async (_request, response) => {
-  const cancelled = await generationController.cancel();
-  activityLog.publish({
-    tone: "ready",
-    source: "generation",
-    message: cancelled ? "Generation cancellation requested." : "No active generation to cancel."
-  });
-  response.json({ cancelled });
+  try {
+    const [legacyCancelled, canceledJobs] = await Promise.all([
+      generationController.cancel(),
+      generationWorker.cancelAll()
+    ]);
+    const cancelled = legacyCancelled || canceledJobs.length > 0;
+    activityLog.publish({
+      tone: "ready",
+      source: "generation",
+      message: cancelled ? "Generation cancellation requested." : "No active generation to cancel."
+    });
+    response.json({ cancelled });
+  } catch (error) {
+    response.status(502).json({ error: toErrorMessage(error) });
+  }
 });
 
 async function enqueueGenerationJobs(

@@ -831,10 +831,11 @@ export async function cancelRunningHubTask(options: {
   fetchImpl?: FetchLike;
   baseUrl?: string;
 }): Promise<void> {
-  const response = await postRunningHub(
+  const response = await postRunningHubV2(
     options.fetchImpl ?? fetch,
     new URL("/task/openapi/cancel", options.baseUrl ?? defaultRunningHubBaseUrl),
     { apiKey: options.apiKey, taskId: options.taskId },
+    options.apiKey,
     `cancelling task ${options.taskId}`
   );
   assertRunningHubOk(await response.json() as unknown, `cancel task ${options.taskId}`);

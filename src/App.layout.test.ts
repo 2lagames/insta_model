@@ -105,6 +105,15 @@ describe("studio preview layout", () => {
     expect(queuePage).not.toContain("выполняются последовательно");
   });
 
+  it("keeps a failed provider cancellation retryable from Queue", () => {
+    const appSource = readFileSync("src/App.tsx", "utf8");
+    const queueStart = appSource.indexOf("function GenerationQueuePage");
+    const queuePage = appSource.slice(queueStart, appSource.indexOf("function Preview", queueStart));
+
+    expect(queuePage).toContain('"canceling"');
+    expect(queuePage).toContain('job.status === "canceling" ? "Повторить отмену" : "Отменить"');
+  });
+
   it("deduplicates enqueue responses and shows visible queued movement feedback", () => {
     const appSource = readFileSync("src/App.tsx", "utf8");
     const cssSource = readFileSync("src/App.css", "utf8");

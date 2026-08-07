@@ -95,7 +95,10 @@ describe("cancelRunningHubTask", () => {
 
     expect(fetchImpl).toHaveBeenCalledWith(new URL("/task/openapi/cancel", "https://runninghub.example.com"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer runninghub-key"
+      },
       body: JSON.stringify({ apiKey: "runninghub-key", taskId: "task-1" })
     });
   });

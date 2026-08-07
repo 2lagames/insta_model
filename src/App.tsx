@@ -1311,7 +1311,7 @@ function GenerationQueuePage({
       {visibleJobs.length === 0 ? <div className="queue-empty">В этой группе пока нет заданий.</div> : visibleJobs.map((job) => {
         const outputPath = job.output?.files.video ?? job.output?.files.image;
         const previewPath = job.input.job.media.imagePath ?? job.input.job.sourceImage?.imagePath ?? job.input.job.generatedImage?.imagePath;
-        const canCancel = ["queued", "preparing", "uploading", "submitting", "running", "downloading"].includes(job.status);
+        const canCancel = ["queued", "preparing", "uploading", "submitting", "running", "downloading", "canceling"].includes(job.status);
         const canRetry = job.status === "failed" || job.status === "recovery_required";
         const moveAvailability = getGenerationJobMoveAvailability(jobs, job.id);
         const queuePosition = getGenerationJobQueuePosition(jobs, job.id);
@@ -1355,7 +1355,7 @@ function GenerationQueuePage({
               <button aria-label={`Переместить ${job.input.job.media.label} вверх`} className={`queue-order-button${isMoving ? " queue-order-button-moving" : ""}`} disabled={isMoving || !moveAvailability.canMoveUp} onClick={() => void handleQueueMove(job.id, "up")} title="Переместить вверх" type="button">↑</button>
               <button aria-label={`Переместить ${job.input.job.media.label} вниз`} className={`queue-order-button${isMoving ? " queue-order-button-moving" : ""}`} disabled={isMoving || !moveAvailability.canMoveDown} onClick={() => void handleQueueMove(job.id, "down")} title="Переместить вниз" type="button">↓</button>
             </div> : null}
-            {canCancel ? <button className="queue-action-secondary" onClick={() => onCancel(job.id)} type="button">Отменить</button> : null}
+            {canCancel ? <button className="queue-action-secondary" onClick={() => onCancel(job.id)} type="button">{job.status === "canceling" ? "Повторить отмену" : "Отменить"}</button> : null}
             {canRetry ? <button className="queue-action-primary" onClick={() => onRetry(job.id, job.status === "recovery_required")} type="button">Повторить</button> : null}
             {outputPath ? <a className="queue-action-primary" href={outputPath} rel="noreferrer" target="_blank">Открыть</a> : null}
           </div>

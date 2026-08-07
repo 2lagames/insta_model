@@ -36,6 +36,10 @@ type ActiveExecution = {
   promise: Promise<void>;
 };
 
+const cancellableStatuses = new Set<GenerationJobStatus>([
+  "queued", "preparing", "uploading", "submitting", "running", "downloading", "canceling"
+]);
+
 export class GenerationWorker {
   private readonly active = new Map<string, ActiveExecution>();
   private readonly concurrency: GenerationConcurrency;
@@ -98,12 +102,27 @@ export class GenerationWorker {
     if (activeExecution) {
       if (job.providerTaskId) {
         await this.requestProviderCancellation(job);
+        const current = await this.queue.get(jobId);
+        if (current?.status === "canceling") {
+          const canceled = await this.queue.transition(jobId, "canceled", { completedAt: new Date().toISOString() });
+          activeExecution.abortController.abort();
+          this.onChange();
+          return canceled;
+        }
       } else {
         activeExecution.abortController.abort();
       }
     }
     this.onChange();
     return job;
+  }
+
+  async cancelAll(): Promise<GenerationJob[]> {
+    const jobs = (await this.queue.list()).filter((job) => cancellableStatuses.has(job.status));
+    const results = await Promise.allSettled(jobs.map((job) => this.cancel(job.id)));
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failure) throw failure.reason;
+    return results.map((result) => (result as PromiseFulfilledResult<GenerationJob>).value);
   }
 
   private async schedule(): Promise<void> {
@@ -173,6 +192,9 @@ export class GenerationWorker {
                   await this.requestProviderCancellation(executingJob);
                   cancellationRequestedTaskId = taskId;
                 }
+                if (executingJob.status === "canceling" && cancellationRequestedTaskId === taskId) {
+                  executingJob = await this.queue.transition(job.id, "canceled", { completedAt: new Date().toISOString() });
+                }
                 this.onChange();
                 return;
               } catch (error) {
@@ -186,11 +208,14 @@ export class GenerationWorker {
             }
           }
         });
+        const current = await this.queue.get(job.id);
+        if (current?.status === "canceled") return;
         await this.queue.succeed(job.id, output);
         return;
       } catch (error) {
         const current = await this.queue.get(job.id);
         if (!current) throw error;
+        if (current.status === "canceled") return;
         const message = error instanceof Error ? error.message : "Generation failed.";
         if (error instanceof RunningHubTerminalTaskError) {
           await this.queue.resolveProviderFailure(job.id, {
@@ -237,11 +262,14 @@ export class GenerationWorker {
   }
 
   private async requestProviderCancellation(job: GenerationJob): Promise<void> {
-    if (!this.options.cancelProviderTask) return;
+    if (!this.options.cancelProviderTask) {
+      throw new Error("Provider cancellation is not configured.");
+    }
     try {
       await this.options.cancelProviderTask(job);
     } catch (error) {
       this.options.onCancelError?.(job, error);
+      throw error;
     }
   }
 

@@ -202,12 +202,14 @@ describe("image prompt activity", () => {
     expect(source).toContain("Выберите Standard или Plus для workflow ${workflow.displayId} в настройках RunningHub.");
   });
 
-  it("exposes one cancellation route for active generation work", () => {
+  it("cancels legacy work and every unfinished queue job from Studio", () => {
     const source = readFileSync("server/index.ts", "utf8");
+    const cancelRouteStart = source.indexOf('app.post("/api/generation/cancel"');
+    const cancelRoute = source.slice(cancelRouteStart, source.indexOf("async function enqueueGenerationJobs", cancelRouteStart));
 
-    expect(source).toContain('app.post("/api/generation/cancel"');
-    expect(source).toContain("generationController.cancel()");
-    expect(source).toContain("Generation cancellation requested.");
+    expect(cancelRoute).toContain("generationController.cancel()");
+    expect(cancelRoute).toContain("generationWorker.cancelAll()");
+    expect(cancelRoute).toContain("Generation cancellation requested.");
   });
 
   it("persists explicitly saved prompt text in the current session", () => {
