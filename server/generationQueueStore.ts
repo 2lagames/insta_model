@@ -164,7 +164,7 @@ export class GenerationQueueStore {
           result = updateStatus(job, "running", { providerTaskId });
           return result;
         }
-        if (job.status === "running" || job.status === "canceling") {
+        if (job.status === "running" || job.status === "canceling" || job.status === "canceled") {
           result = {
             ...job,
             providerTaskId,

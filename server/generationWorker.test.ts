@@ -208,7 +208,60 @@ describe("GenerationWorker", () => {
     expect((await queue.get(job.id))?.status).toBe("canceled");
   });
 
-  it("surfaces a RunningHub cancellation failure without stopping polling", async () => {
+  it("finishes a restored canceling job even when it has no active execution", async () => {
+    const root = await mkdtemp(join(tmpdir(), "generation-worker-"));
+    tempDirs.push(root);
+    const queue = new GenerationQueueStore(root);
+    const [job] = await queue.createJobs("video", [input]);
+    await queue.transition(job.id, "preparing");
+    await queue.transition(job.id, "uploading");
+    await queue.transition(job.id, "submitting");
+    await queue.recordProviderTaskId(job.id, "restored-provider-task");
+    await queue.requestCancel(job.id);
+    const canceledTaskIds: string[] = [];
+    const worker = new GenerationWorker(queue, async () => output(job.id), () => undefined, {
+      cancelProviderTask: async (current) => {
+        canceledTaskIds.push(current.providerTaskId!);
+      }
+    });
+
+    const canceled = await worker.cancel(job.id);
+
+    expect(canceled.status).toBe("canceled");
+    expect(canceledTaskIds).toEqual(["restored-provider-task"]);
+    expect((await queue.get(job.id))?.status).toBe("canceled");
+  });
+
+  it("finishes recovered cancellation intent without resuming provider polling", async () => {
+    const root = await mkdtemp(join(tmpdir(), "generation-worker-"));
+    tempDirs.push(root);
+    const queue = new GenerationQueueStore(root);
+    const [job] = await queue.createJobs("video", [input]);
+    await queue.transition(job.id, "preparing");
+    await queue.transition(job.id, "uploading");
+    await queue.transition(job.id, "submitting");
+    await queue.recordProviderTaskId(job.id, "recovered-provider-task");
+    await queue.requestCancel(job.id);
+    let executions = 0;
+    const canceledTaskIds: string[] = [];
+    const worker = new GenerationWorker(queue, async () => {
+      executions += 1;
+      return output(job.id);
+    }, () => undefined, {
+      cancelProviderTask: async (current) => {
+        canceledTaskIds.push(current.providerTaskId!);
+      }
+    });
+
+    await worker.start();
+    await worker.whenIdle();
+
+    expect(executions).toBe(0);
+    expect(canceledTaskIds).toEqual(["recovered-provider-task"]);
+    expect((await queue.get(job.id))?.status).toBe("canceled");
+  });
+
+  it("stops local polling when RunningHub rejects cancellation", async () => {
     const root = await mkdtemp(join(tmpdir(), "generation-worker-"));
     tempDirs.push(root);
     const queue = new GenerationQueueStore(root);
@@ -233,9 +286,10 @@ describe("GenerationWorker", () => {
     await worker.start();
     await submitted.promise;
     try {
-      await expect(worker.cancel(job.id)).rejects.toThrow("RunningHub rejected cancellation");
-      expect(signal?.aborted).toBe(false);
-      expect((await queue.get(job.id))?.status).toBe("canceling");
+      const canceled = await worker.cancel(job.id);
+      expect(canceled.status).toBe("canceled");
+      expect(signal?.aborted).toBe(true);
+      expect((await queue.get(job.id))?.status).toBe("canceled");
     } finally {
       release.resolve();
       await worker.whenIdle();
@@ -325,7 +379,7 @@ describe("GenerationWorker", () => {
     });
   });
 
-  it("keeps a failed provider cancellation retryable without starting the next job", async () => {
+  it("continues with the next job after a provider cancellation request fails", async () => {
     const root = await mkdtemp(join(tmpdir(), "generation-worker-"));
     tempDirs.push(root);
     const queue = new GenerationQueueStore(root);
@@ -355,14 +409,10 @@ describe("GenerationWorker", () => {
 
     await worker.start();
     await firstSubmitted.promise;
-    await expect(worker.cancel(jobs[0].id)).rejects.toThrow("cancellation temporarily unavailable");
-
-    expect(starts).toEqual([jobs[0].id]);
-    expect((await queue.get(jobs[0].id))?.status).toBe("canceling");
-    expect((await queue.get(jobs[1].id))?.status).toBe("queued");
-
     await worker.cancel(jobs[0].id);
     await worker.whenIdle();
+
+    expect(starts).toEqual(jobs.map((job) => job.id));
     expect((await queue.list()).map((job) => job.status)).toEqual(["canceled", "succeeded"]);
   });
 

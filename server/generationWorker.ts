@@ -99,22 +99,16 @@ export class GenerationWorker {
   async cancel(jobId: string): Promise<GenerationJob> {
     const job = await this.queue.requestCancel(jobId);
     const activeExecution = this.active.get(jobId);
-    if (activeExecution) {
-      if (job.providerTaskId) {
-        await this.requestProviderCancellation(job);
-        const current = await this.queue.get(jobId);
-        if (current?.status === "canceling") {
-          const canceled = await this.queue.transition(jobId, "canceled", { completedAt: new Date().toISOString() });
-          activeExecution.abortController.abort();
-          this.onChange();
-          return canceled;
-        }
-      } else {
-        activeExecution.abortController.abort();
-      }
+    if (job.status !== "canceling") {
+      this.onChange();
+      return job;
     }
+
+    const canceled = await this.queue.transition(jobId, "canceled", { completedAt: new Date().toISOString() });
+    activeExecution?.abortController.abort();
     this.onChange();
-    return job;
+    if (job.providerTaskId) await this.requestProviderCancellation(job);
+    return canceled;
   }
 
   async cancelAll(): Promise<GenerationJob[]> {
@@ -163,8 +157,11 @@ export class GenerationWorker {
             executingJob.cancelRequestedAt ? "canceling" : "running"
           );
           if (executingJob.cancelRequestedAt) {
+            executingJob = await this.queue.transition(job.id, "canceled", { completedAt: new Date().toISOString() });
+            execution.abortController.abort();
+            this.onChange();
             await this.requestProviderCancellation(executingJob);
-            cancellationRequestedTaskId = executingJob.providerTaskId;
+            return;
           }
           this.onChange();
         }
@@ -183,17 +180,22 @@ export class GenerationWorker {
             while (true) {
               try {
                 const current = await this.queue.get(job.id);
-                if (current?.status === "canceling" && cancellationRequestedTaskId !== taskId) {
-                  await this.requestProviderCancellation({ ...current, providerTaskId: taskId });
+                if ((current?.status === "canceling" || current?.status === "canceled")
+                  && cancellationRequestedTaskId !== taskId) {
                   cancellationRequestedTaskId = taskId;
+                  await this.requestProviderCancellation({ ...current, providerTaskId: taskId });
                 }
                 executingJob = await this.queue.recordProviderTaskId(job.id, taskId);
-                if (executingJob.status === "canceling" && cancellationRequestedTaskId !== taskId) {
-                  await this.requestProviderCancellation(executingJob);
-                  cancellationRequestedTaskId = taskId;
-                }
-                if (executingJob.status === "canceling" && cancellationRequestedTaskId === taskId) {
-                  executingJob = await this.queue.transition(job.id, "canceled", { completedAt: new Date().toISOString() });
+                if (executingJob.status === "canceling" || executingJob.status === "canceled") {
+                  if (executingJob.status === "canceling") {
+                    executingJob = await this.queue.transition(job.id, "canceled", { completedAt: new Date().toISOString() });
+                  }
+                  this.onChange();
+                  if (cancellationRequestedTaskId !== taskId) {
+                    cancellationRequestedTaskId = taskId;
+                    await this.requestProviderCancellation(executingJob);
+                  }
+                  return;
                 }
                 this.onChange();
                 return;
@@ -203,6 +205,11 @@ export class GenerationWorker {
                   ? { ...current, providerTaskId: taskId }
                   : { ...executingJob, providerTaskId: taskId };
                 this.reportWorkerError(error, pendingJob);
+                if ((pendingJob.status === "canceling" || pendingJob.status === "canceled")
+                  && cancellationRequestedTaskId !== taskId) {
+                  cancellationRequestedTaskId = taskId;
+                  await this.requestProviderCancellation(pendingJob);
+                }
                 await waitForRetry(this.options.resumableRetryDelayMs ?? 5_000);
               }
             }
@@ -228,16 +235,8 @@ export class GenerationWorker {
           return;
         }
         if (current.status === "canceling") {
-          if (!current.providerTaskId) {
-            await this.queue.transition(job.id, "canceled", { completedAt: new Date().toISOString() });
-            return;
-          }
-          executingJob = current;
-          if (execution.abortController.signal.aborted) {
-            execution.abortController = new AbortController();
-          }
-          await waitForRetry(this.options.resumableRetryDelayMs ?? 5_000);
-          continue;
+          await this.queue.transition(job.id, "canceled", { completedAt: new Date().toISOString() });
+          return;
         }
         if (current.status === "running" && current.providerTaskId) {
           this.reportWorkerError(error, current);
@@ -262,14 +261,11 @@ export class GenerationWorker {
   }
 
   private async requestProviderCancellation(job: GenerationJob): Promise<void> {
-    if (!this.options.cancelProviderTask) {
-      throw new Error("Provider cancellation is not configured.");
-    }
+    if (!this.options.cancelProviderTask) return;
     try {
       await this.options.cancelProviderTask(job);
     } catch (error) {
       this.options.onCancelError?.(job, error);
-      throw error;
     }
   }
 
