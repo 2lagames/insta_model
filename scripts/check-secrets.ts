@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 const privatePathPatterns = [
   /(^|\/)(data|input|output)(\/|$)/i,
+  /(^|\/)(\.superpowers|\.agents|\.codex|\.worktrees|docs)(\/|$)/i,
+  /(^|\/)(AGENTS|CLAUDE|GEMINI|COPILOT|plan)\.md$/i,
   /(^|\/)\.env($|\.)/i,
   /(^|\/).*\.local\.json$/i,
   /(^|\/)(credentials?|secrets?|private|personal)(\/|$)/i,
